@@ -5,7 +5,7 @@ Personal bridge project (in progress): real-time motor-imagery EEG decoding driv
 ## Stack
 
 - **EEG pipeline** — Python (`rclpy`), MNE, scikit-learn (CSP + LDA baseline), PyTorch (EEGNet)
-- **Hardware** — Unicorn Hybrid Black recordings (may swap MNE-LSL for BrainFlow)
+- **Hardware** — BrainAccess MIDI, 16 channels at 250 Hz
 - **Robot control** — C++ (`rclcpp`) nodes
 - **Simulation** — Gazebo (Franka Panda)
 
