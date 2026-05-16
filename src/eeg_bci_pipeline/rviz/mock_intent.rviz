@@ -24,7 +24,7 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
-      Marker Topic:
+      Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
