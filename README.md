@@ -10,16 +10,17 @@ The workspace can run a no-device ROS graph where synthetic EEG frames are decod
 - **EEG pipeline**: Python (`rclpy`) mock EEG publisher and deterministic baseline decoder
 - **Interfaces**: custom EEG frame and intent messages
 - **Robot control**: C++ (`rclcpp`) intent subscriber/logger
+- **Visualization**: RViz marker for the current decoded intent
 
 ## Packages
 
 - `eeg_bci_interfaces`: shared ROS messages
-- `eeg_bci_pipeline`: mock EEG publisher, baseline decoder, and launch file
+- `eeg_bci_pipeline`: mock EEG publisher, baseline decoder, RViz intent marker, and launch files
 - `manipulator_control`: robot-control boundary node
 
 ## Build
 
-The devcontainer installs `ros-jazzy-ros-base` and `ros-dev-tools`. If you are not using the devcontainer, install ROS 2 Jazzy first using the official Ubuntu deb package instructions: <https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html>.
+The devcontainer installs `ros-jazzy-ros-base`, `ros-jazzy-rviz2`, and `ros-dev-tools`. If you are not using the devcontainer, install ROS 2 Jazzy first using the official Ubuntu deb package instructions: <https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html>.
 
 Source ROS before building:
 
@@ -43,6 +44,12 @@ In another shell:
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 topic echo /bci/intent
+```
+
+Start the mock pipeline with an RViz intent marker:
+
+```bash
+ros2 launch eeg_bci_pipeline mock_rviz.launch.py
 ```
 
 ## Test
