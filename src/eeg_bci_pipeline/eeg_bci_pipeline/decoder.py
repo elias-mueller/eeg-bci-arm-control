@@ -39,6 +39,7 @@ def decode_mock_intent(
         probabilities = _one_hot(labels, 0, confidence=1.0)
         return IntentPrediction(labels[0], 1.0, labels, probabilities)
 
+    # RMS estimates signal magnitude without positive and negative samples canceling out.
     rms = sqrt(sum(sample * sample for sample in values) / len(values))
     selected_index = min(int(rms // 15.0), len(labels) - 1)
     confidence = max(0.5, min(0.95, 0.5 + (rms % 15.0) / 30.0))
