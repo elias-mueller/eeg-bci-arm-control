@@ -11,10 +11,8 @@
 
 ## Project
 
-EEG-BCI Manipulator Control. In-progress personal project: real-time motor-imagery EEG pipeline driving a simulated Franka Panda manipulator over ROS 2.
+EEG-BCI Manipulator Control: real-time motor-imagery EEG pipeline driving a simulated Franka Panda manipulator over ROS 2.
 
 - **EEG pipeline.** Python (`rclpy`), MNE, scikit-learn. 16-channel BrainAccess MIDI recordings at 250 Hz. CSP + LDA baseline; EEGNet (PyTorch) experiments.
 - **Robot control.** C++ (`rclcpp`) ROS 2 nodes.
 - **Simulation.** Gazebo with a Franka Panda model.
-
-Status: early. Scope and dependencies still in flux.
