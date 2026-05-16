@@ -12,7 +12,9 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>manipulator_control</exec_depend>
+  <exec_depend>rviz2</exec_depend>
   <depend>rclpy</depend>
+  <depend>visualization_msgs</depend>
   <test_depend>ament_pytest</test_depend>
 
   <export>
