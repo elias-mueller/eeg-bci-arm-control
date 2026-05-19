@@ -26,7 +26,7 @@ public:
   }
 
 private:
-  rclcpp::Subscription<eeg_bci_interfaces::msg::Intent>::SharedPtr subscription_;
+  rclcpp::Subscription<eeg_bci_interfaces::msg::Intent>::SharedPtr subscription_{};
 };
 
 int main(int argc, char * argv[])

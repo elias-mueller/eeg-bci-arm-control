@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+ros_distro="${ROS_DISTRO:-jazzy}"
+ros_setup="/opt/ros/${ros_distro}/setup.bash"
+workspace_setup="$repo_root/install/setup.bash"
+
+if [ ! -f "$ros_setup" ]; then
+  echo "ROS setup not found at $ros_setup" >&2
+  exit 1
+fi
+if [ ! -f "$workspace_setup" ]; then
+  echo "Workspace is not built. Run: scripts/build" >&2
+  exit 1
+fi
+
+set +u
+# shellcheck source=/dev/null
+source "$ros_setup"
+# shellcheck source=/dev/null
+source "$workspace_setup"
+set -u
+
+cd "$repo_root"
+exec ros2 launch eeg_bci_pipeline mock_pipeline.launch.py "$@"
