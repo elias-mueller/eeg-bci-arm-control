@@ -73,3 +73,30 @@ def test_default_mock_signal_cycle_reaches_all_intent_buckets():
         labels.append(decode_mock_intent(samples).label)
 
     assert labels == ["rest", "left_hand", "right_hand"]
+
+
+def test_mock_signal_is_channel_major():
+    samples = generate_mock_eeg_samples(
+        start_sample_index=0,
+        samples_per_frame=3,
+        channel_count=2,
+        sampling_rate_hz=250.0,
+        amplitude_uv=1.0,
+    )
+    channel_0_samples = generate_mock_eeg_samples(
+        start_sample_index=0,
+        samples_per_frame=3,
+        channel_count=1,
+        sampling_rate_hz=250.0,
+        amplitude_uv=1.0,
+    )
+    first_samples_by_channel = generate_mock_eeg_samples(
+        start_sample_index=0,
+        samples_per_frame=1,
+        channel_count=2,
+        sampling_rate_hz=250.0,
+        amplitude_uv=1.0,
+    )
+
+    assert samples[:3] == pytest.approx(channel_0_samples)
+    assert samples[3] == pytest.approx(first_samples_by_channel[1])

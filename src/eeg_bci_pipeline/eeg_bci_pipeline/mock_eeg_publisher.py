@@ -7,6 +7,11 @@ from eeg_bci_interfaces.msg import EegFrame
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
+from eeg_bci_pipeline.eeg_frame_contract import (
+    DEFAULT_EEG_CHANNEL_COUNT,
+    DEFAULT_EEG_SAMPLING_RATE_HZ,
+    default_channel_labels,
+)
 from eeg_bci_pipeline.mock_signal import (
     DEFAULT_AMPLITUDE_CYCLE_UV,
     generate_mock_eeg_samples,
@@ -20,8 +25,8 @@ class MockEegPublisher(Node):
     def __init__(self) -> None:
         super().__init__("mock_eeg_publisher")
         self.declare_parameter("source_id", "mock-eeg")
-        self.declare_parameter("sampling_rate_hz", 250.0)
-        self.declare_parameter("channel_count", 16)
+        self.declare_parameter("sampling_rate_hz", DEFAULT_EEG_SAMPLING_RATE_HZ)
+        self.declare_parameter("channel_count", DEFAULT_EEG_CHANNEL_COUNT)
         self.declare_parameter("samples_per_frame", 25)
         self.declare_parameter("publish_rate_hz", 10.0)
         self.declare_parameter("amplitude_cycle_uv", list(DEFAULT_AMPLITUDE_CYCLE_UV))
@@ -39,7 +44,7 @@ class MockEegPublisher(Node):
         publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
         topic = self.get_parameter("topic").value
 
-        self._channel_labels = [f"ch_{index + 1:02d}" for index in range(self._channel_count)]
+        self._channel_labels = list(default_channel_labels(self._channel_count))
         self._sample_index = 0
         self._frame_index = 0
         self._publisher = self.create_publisher(EegFrame, topic, qos_profile_sensor_data)

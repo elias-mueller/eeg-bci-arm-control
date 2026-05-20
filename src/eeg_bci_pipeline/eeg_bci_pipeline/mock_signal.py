@@ -30,15 +30,15 @@ def generate_mock_eeg_samples(
     sampling_rate_hz: float,
     amplitude_uv: float,
 ) -> list[float]:
-    """Generate sample-major synthetic EEG data.
+    """Generate channel-major synthetic EEG data.
 
-    Layout is [sample0_ch0, sample0_ch1, ..., sample1_ch0, ...].
+    Layout is [ch0_sample0, ch0_sample1, ..., ch1_sample0, ...].
     """
 
     samples: list[float] = []
-    for sample_offset in range(samples_per_frame):
-        t = (start_sample_index + sample_offset) / sampling_rate_hz
-        for channel_index in range(channel_count):
+    for channel_index in range(channel_count):
+        for sample_offset in range(samples_per_frame):
+            t = (start_sample_index + sample_offset) / sampling_rate_hz
             carrier = sin(2.0 * pi * 10.0 * t)
             modulation = sin(2.0 * pi * 0.5 * t + channel_index * 0.2)
             samples.append(amplitude_uv * (carrier + 0.25 * modulation))
