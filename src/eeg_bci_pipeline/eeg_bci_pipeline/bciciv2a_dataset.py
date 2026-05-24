@@ -10,7 +10,6 @@ import numpy as np
 
 from eeg_bci_pipeline.gdf_recording import recording_from_mne_raw
 
-
 BCICIV2A_CUE_LABELS = {
     "769": "left_hand",
     "770": "right_hand",

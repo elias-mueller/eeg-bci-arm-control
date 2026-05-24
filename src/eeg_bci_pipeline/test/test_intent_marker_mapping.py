@@ -1,5 +1,4 @@
 import pytest
-
 from eeg_bci_pipeline.intent_marker_mapping import style_for_intent
 
 

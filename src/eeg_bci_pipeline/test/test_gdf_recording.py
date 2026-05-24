@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-
 from eeg_bci_pipeline.gdf_recording import (
     VOLTS_TO_MICROVOLTS,
     iter_replay_frames,

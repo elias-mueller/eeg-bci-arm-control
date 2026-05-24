@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+pipx_bin="${PIPX_BIN_DIR:-$HOME/.local/bin}"
+if [ -d "$pipx_bin" ]; then
+  PATH="$pipx_bin:$PATH"
+fi
+
+args=("$@")
+if [ "${#args[@]}" -eq 0 ]; then
+  args=(".")
+fi
+
+if command -v ruff >/dev/null 2>&1; then
+  ruff format "${args[@]}"
+  exec ruff check --select I --fix "${args[@]}"
+fi
+
+if python3 -m ruff --version >/dev/null 2>&1; then
+  python3 -m ruff format "${args[@]}"
+  exec python3 -m ruff check --select I --fix "${args[@]}"
+fi
+
+cat >&2 <<'EOF'
+ruff is not installed.
+Run:
+  scripts/setup-dev-tools
+EOF
+exit 127

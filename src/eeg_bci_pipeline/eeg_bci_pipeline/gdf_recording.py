@@ -8,7 +8,6 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-
 BCICIV2A_EEG_CHANNEL_COUNT = 22
 DEFAULT_REPLAY_SAMPLES_PER_FRAME = 25
 VOLTS_TO_MICROVOLTS = 1_000_000.0
@@ -123,9 +122,7 @@ def normalize_channel_labels(channel_labels: Sequence[str]) -> tuple[str, ...]:
     """Normalize explicitly configured channel labels."""
 
     if isinstance(channel_labels, str):
-        raise ValueError(
-            "channel_labels must be a sequence of labels, not a single string"
-        )
+        raise ValueError("channel_labels must be a sequence of labels, not a single string")
 
     try:
         labels = tuple(str(label).strip() for label in channel_labels)

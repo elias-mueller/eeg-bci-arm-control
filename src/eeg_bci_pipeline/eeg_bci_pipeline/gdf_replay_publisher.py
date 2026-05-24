@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Sequence
 
 import rclpy
-from eeg_bci_interfaces.msg import EegFrame
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
+from eeg_bci_interfaces.msg import EegFrame
 from eeg_bci_pipeline.eeg_frame_contract import (
     DEFAULT_EEG_SAMPLING_RATE_HZ,
     DEFAULT_MAX_ABS_SAMPLE_UV,

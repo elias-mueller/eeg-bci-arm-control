@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+if ! command -v pipx >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+pipx is required to install the Python developer tools.
+Install pipx first, then rerun this script.
+EOF
+  exit 127
+fi
+
+pipx_bin="${PIPX_BIN_DIR:-$HOME/.local/bin}"
+if [ -d "$pipx_bin" ]; then
+  PATH="$pipx_bin:$PATH"
+fi
+
+install_tool() {
+  local package_name="$1"
+  local command_name="$2"
+
+  if command -v "$command_name" >/dev/null 2>&1; then
+    echo "$command_name is already available"
+    return
+  fi
+
+  if [ -x "$pipx_bin/$command_name" ]; then
+    echo "$command_name is already installed in $pipx_bin"
+    return
+  fi
+
+  pipx install "$package_name"
+}
+
+install_tool ruff ruff
+install_tool basedpyright basedpyright
+
+pipx ensurepath >/dev/null 2>&1 || true
+
+cat <<EOF
+Developer tools are ready.
+The repo scripts also check $pipx_bin, so they work even before your shell PATH refreshes.
+EOF

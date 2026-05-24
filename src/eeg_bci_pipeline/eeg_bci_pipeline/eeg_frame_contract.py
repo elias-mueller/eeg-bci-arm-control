@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Sequence
 
-
 DEFAULT_EEG_CHANNEL_COUNT = 16
 DEFAULT_EEG_SAMPLING_RATE_HZ = 250.0
 DEFAULT_SAMPLING_RATE_TOLERANCE_HZ = 0.5
@@ -72,8 +71,7 @@ def validate_eeg_frame_payload(
     if expected_labels is not None:
         if labels != expected_labels:
             raise EegFrameContractError(
-                "channel_labels must remain stable and ordered exactly as "
-                f"{expected_labels}"
+                f"channel_labels must remain stable and ordered exactly as {expected_labels}"
             )
 
     sample_count = len(samples)
@@ -158,8 +156,7 @@ def _validate_samples(samples: Sequence[float], max_abs_sample_uv: float) -> flo
         abs_value = abs(value)
         if abs_value > max_abs:
             raise EegFrameContractError(
-                f"samples[{index}] must be less than or equal to "
-                f"{max_abs:g} {EEG_SAMPLE_UNIT}"
+                f"samples[{index}] must be less than or equal to {max_abs:g} {EEG_SAMPLE_UNIT}"
             )
         peak_abs = max(peak_abs, abs_value)
     return peak_abs

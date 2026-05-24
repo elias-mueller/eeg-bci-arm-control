@@ -1,5 +1,4 @@
 import pytest
-
 from eeg_bci_pipeline.eeg_frame_contract import (
     DEFAULT_EEG_CHANNEL_COUNT,
     DEFAULT_EEG_SAMPLING_RATE_HZ,

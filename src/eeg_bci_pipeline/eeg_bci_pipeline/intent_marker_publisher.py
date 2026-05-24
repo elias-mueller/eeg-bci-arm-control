@@ -5,10 +5,10 @@ from __future__ import annotations
 from math import cos, sin
 
 import rclpy
-from eeg_bci_interfaces.msg import Intent
 from rclpy.node import Node
 from visualization_msgs.msg import Marker
 
+from eeg_bci_interfaces.msg import Intent
 from eeg_bci_pipeline.intent_marker_mapping import IntentMarkerStyle, style_for_intent
 
 
@@ -32,9 +32,7 @@ class IntentMarkerPublisher(Node):
             self._on_intent,
             10,
         )
-        self.get_logger().info(
-            f"Publishing intent markers from {input_topic} to {marker_topic}"
-        )
+        self.get_logger().info(f"Publishing intent markers from {input_topic} to {marker_topic}")
 
     def _on_intent(self, intent: Intent) -> None:
         style = style_for_intent(intent.label, intent.confidence)

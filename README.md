@@ -49,8 +49,15 @@ scripts/test
 - `scripts/run-robot`: launch the mock pipeline with the Panda-style robot state publisher
 - `scripts/run-robot-rviz`: launch the mock robot pipeline and RViz robot visualization
 - `scripts/run-bciciv2a`: replay a BCI Competition IV 2a GDF recording into the pipeline
+- `scripts/lint`: check Python formatting/imports and Ruff lint rules
+- `scripts/format`: format Python files and sort imports with Ruff
+- `scripts/typecheck`: run basedpyright on the pure Python pipeline helpers
+- `scripts/setup-dev-tools`: install Ruff and basedpyright with pipx
 
-All scripts source `/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash`. All scripts except `build` also source `install/setup.bash` and require a prior `scripts/build`. Extra arguments are passed through to `colcon` or `ros2 launch`.
+The ROS build, test, and launch scripts source `/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash`.
+ROS launch and test scripts also source `install/setup.bash` and require a prior `scripts/build`.
+Extra arguments are passed through to `colcon`, `ros2 launch`, Ruff, or basedpyright.
+Run `scripts/setup-dev-tools` once to install optional Python developer tools.
 
 ## Mock Robot Behavior
 

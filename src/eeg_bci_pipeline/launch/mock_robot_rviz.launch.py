@@ -8,9 +8,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description() -> LaunchDescription:
     package_share = FindPackageShare("eeg_bci_pipeline")
-    mock_robot_launch = PathJoinSubstitution(
-        [package_share, "launch", "mock_robot.launch.py"]
-    )
+    mock_robot_launch = PathJoinSubstitution([package_share, "launch", "mock_robot.launch.py"])
     rviz_config = PathJoinSubstitution([package_share, "rviz", "mock_robot.rviz"])
 
     return LaunchDescription(

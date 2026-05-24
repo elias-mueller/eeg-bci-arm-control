@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import rclpy
-from eeg_bci_interfaces.msg import EegFrame
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
+from eeg_bci_interfaces.msg import EegFrame
 from eeg_bci_pipeline.eeg_frame_contract import (
     DEFAULT_EEG_CHANNEL_COUNT,
     DEFAULT_EEG_SAMPLING_RATE_HZ,

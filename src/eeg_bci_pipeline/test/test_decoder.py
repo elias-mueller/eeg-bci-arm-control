@@ -1,5 +1,4 @@
 import pytest
-
 from eeg_bci_pipeline.decoder import DEFAULT_CLASS_LABELS, decode_mock_intent
 from eeg_bci_pipeline.mock_signal import (
     DEFAULT_AMPLITUDE_CYCLE_UV,
@@ -62,7 +61,9 @@ def test_empty_class_labels_are_rejected():
 def test_default_mock_signal_cycle_reaches_all_intent_buckets():
     labels = []
     for frame_index in (0, 10, 20):
-        amplitude = select_cycle_value(DEFAULT_AMPLITUDE_CYCLE_UV, frame_index, frames_per_value=10)
+        amplitude = select_cycle_value(
+            DEFAULT_AMPLITUDE_CYCLE_UV, frame_index, frames_per_value=10
+        )
         samples = generate_mock_eeg_samples(
             start_sample_index=frame_index * 25,
             samples_per_frame=25,

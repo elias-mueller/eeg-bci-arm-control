@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from math import sqrt
 from typing import Iterable, Sequence
 
-
 DEFAULT_CLASS_LABELS = ("rest", "left_hand", "right_hand")
 
 
@@ -57,4 +56,6 @@ def _one_hot(
 
     remaining = max(0.0, 1.0 - confidence)
     fallback = remaining / (len(labels) - 1)
-    return tuple(confidence if index == selected_index else fallback for index, _ in enumerate(labels))
+    return tuple(
+        confidence if index == selected_index else fallback for index, _ in enumerate(labels)
+    )

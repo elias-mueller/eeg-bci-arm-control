@@ -5,7 +5,6 @@ from __future__ import annotations
 from math import pi, sin
 from typing import Sequence
 
-
 DEFAULT_AMPLITUDE_CYCLE_UV = (10.0, 25.0, 45.0)
 
 

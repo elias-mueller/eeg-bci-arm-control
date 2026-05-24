@@ -1,0 +1,43 @@
+[tool.basedpyright]
+include = [
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/bciciv2a_dataset.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/decoder.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/eeg_frame_contract.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/gdf_recording.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/intent_marker_mapping.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/mock_signal.py",
+]
+exclude = [
+  "**/__pycache__",
+  ".venv",
+  "build",
+  "install",
+  "log",
+]
+extraPaths = ["src/eeg_bci_pipeline"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingImports = "warning"
+reportMissingTypeStubs = false
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+extend-exclude = [
+  "build",
+  "install",
+  "log",
+]
+
+[tool.ruff.lint]
+select = [
+  "E4",
+  "E7",
+  "E9",
+  "F",
+  "I",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

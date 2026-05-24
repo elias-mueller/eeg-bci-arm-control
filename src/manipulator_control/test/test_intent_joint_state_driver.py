@@ -2,13 +2,13 @@ import time
 import unittest
 
 import launch
-import launch_testing.actions
 import launch_ros.actions
+import launch_testing.actions
 import pytest
 import rclpy
-from eeg_bci_interfaces.msg import Intent
 from sensor_msgs.msg import JointState
 
+from eeg_bci_interfaces.msg import Intent
 
 INTENT_TOPIC = "/test/bci/intent"
 JOINT_STATE_TOPIC = "/test/joint_states"

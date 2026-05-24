@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Sequence
 
 import rclpy
-from eeg_bci_interfaces.msg import EegFrame, Intent
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
+from eeg_bci_interfaces.msg import EegFrame, Intent
 from eeg_bci_pipeline.decoder import DEFAULT_CLASS_LABELS, decode_mock_intent
 from eeg_bci_pipeline.eeg_frame_contract import (
     DEFAULT_EEG_CHANNEL_COUNT,
@@ -19,7 +19,6 @@ from eeg_bci_pipeline.eeg_frame_contract import (
     EegFrameContractError,
     validate_eeg_frame_payload,
 )
-
 
 SMALL_PEAK_WARNING_INTERVAL_FRAMES = 100
 CONTRACT_WARNING_INTERVAL_FRAMES = 100
