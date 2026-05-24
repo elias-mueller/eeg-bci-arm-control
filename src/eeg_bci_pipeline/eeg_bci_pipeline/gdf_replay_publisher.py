@@ -132,11 +132,13 @@ class GdfReplayPublisher(Node):
 
 def main(args: Sequence[str] | None = None) -> None:
     rclpy.init(args=args)
-    node = GdfReplayPublisher()
+    node = None
     try:
+        node = GdfReplayPublisher()
         rclpy.spin(node)
     finally:
-        node.destroy_node()
+        if node is not None:
+            node.destroy_node()
         rclpy.shutdown()
 
 

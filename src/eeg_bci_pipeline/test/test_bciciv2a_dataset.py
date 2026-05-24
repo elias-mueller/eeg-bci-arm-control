@@ -58,6 +58,37 @@ def test_extract_bciciv2a_epochs_can_filter_left_right():
     assert epochs.labels == ("left_hand", "right_hand")
 
 
+def test_extract_bciciv2a_epochs_accepts_bytes_annotation_descriptions():
+    raw = FakeRaw()
+    raw.annotations.description = [b"769", b"770", b"999"]
+    raw.annotations.onset = [1.0, 2.0, 3.0]
+
+    epochs = extract_bciciv2a_epochs(
+        raw,
+        source_id="A01T",
+        tmin_sec=0.0,
+        tmax_sec=1.0,
+    )
+
+    assert epochs.labels == ("left_hand", "right_hand")
+
+
+def test_extract_bciciv2a_epochs_counts_skipped_boundary_epochs():
+    raw = FakeRaw()
+    raw.annotations.onset = [0.0, 1.0, 9.5]
+    raw.annotations.description = ["769", "770", "771"]
+
+    epochs = extract_bciciv2a_epochs(
+        raw,
+        source_id="A01T",
+        tmin_sec=-0.1,
+        tmax_sec=1.0,
+    )
+
+    assert epochs.labels == ("right_hand",)
+    assert epochs.skipped_epoch_count == 2
+
+
 def test_extract_bciciv2a_epochs_rejects_invalid_windows_and_labels():
     with pytest.raises(ValueError, match="tmax_sec"):
         extract_bciciv2a_epochs(FakeRaw(), source_id="A01T", tmin_sec=1.0, tmax_sec=1.0)
@@ -67,4 +98,11 @@ def test_extract_bciciv2a_epochs_rejects_invalid_windows_and_labels():
             FakeRaw(),
             source_id="A01T",
             class_labels=("left_hand", "blink"),
+        )
+
+    with pytest.raises(ValueError, match="unique"):
+        extract_bciciv2a_epochs(
+            FakeRaw(),
+            source_id="A01T",
+            class_labels=("left_hand", "left_hand"),
         )

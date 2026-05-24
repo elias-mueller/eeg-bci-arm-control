@@ -98,7 +98,7 @@ def extract_bciciv2a_epochs(
     skipped = 0
     annotations = zip(raw.annotations.onset, raw.annotations.description)
     for onset_sec, description in annotations:
-        label = BCICIV2A_CUE_LABELS.get(str(description))
+        label = BCICIV2A_CUE_LABELS.get(_annotation_description_key(description))
         if label is None:
             continue
         if label not in selected_label_set:
@@ -138,4 +138,12 @@ def _selected_class_labels(class_labels: Sequence[str] | None) -> tuple[str, ...
     unknown = sorted(set(selected) - set(available_labels))
     if unknown:
         raise ValueError(f"unknown BCIC IV 2a class labels: {unknown}")
+    if len(set(selected)) != len(selected):
+        raise ValueError("BCIC IV 2a class labels must be unique")
     return selected
+
+
+def _annotation_description_key(description) -> str:
+    if isinstance(description, bytes):
+        return description.decode()
+    return str(description)
