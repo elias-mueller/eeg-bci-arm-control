@@ -24,6 +24,7 @@ setup(
     entry_points={
         "console_scripts": [
             "mock_eeg_publisher = eeg_bci_pipeline.mock_eeg_publisher:main",
+            "gdf_replay_publisher = eeg_bci_pipeline.gdf_replay_publisher:main",
             "baseline_intent_decoder = eeg_bci_pipeline.baseline_intent_decoder:main",
             "intent_marker_publisher = eeg_bci_pipeline.intent_marker_publisher:main",
         ],

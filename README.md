@@ -48,6 +48,7 @@ scripts/test
 - `scripts/run-rviz`: launch the mock pipeline with the intent marker in RViz
 - `scripts/run-robot`: launch the mock pipeline with the Panda-style robot state publisher
 - `scripts/run-robot-rviz`: launch the mock robot pipeline and RViz robot visualization
+- `scripts/run-bciciv2a`: replay a BCI Competition IV 2a GDF recording into the pipeline
 
 All scripts source `/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash`. All scripts except `build` also source `install/setup.bash` and require a prior `scripts/build`. Extra arguments are passed through to `colcon` or `ros2 launch`.
 
@@ -80,6 +81,7 @@ ros2 launch eeg_bci_pipeline mock_pipeline.launch.py
 ros2 launch eeg_bci_pipeline mock_rviz.launch.py
 ros2 launch eeg_bci_pipeline mock_robot.launch.py
 ros2 launch eeg_bci_pipeline mock_robot_rviz.launch.py
+ros2 launch eeg_bci_pipeline bciciv2a_replay.launch.py gdf_path:=data/raw/bciciv2a/A01T.gdf
 ```
 
 Pick one launch file for the view you want to run.
