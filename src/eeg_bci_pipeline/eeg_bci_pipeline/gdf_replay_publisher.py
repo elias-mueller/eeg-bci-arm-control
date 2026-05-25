@@ -12,13 +12,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
 from eeg_bci_interfaces.msg import EegFrame
-from eeg_bci_pipeline.eeg_frame_contract import (
-    DEFAULT_EEG_SAMPLING_RATE_HZ,
-    DEFAULT_MAX_ABS_SAMPLE_UV,
-    DEFAULT_SAMPLING_RATE_TOLERANCE_HZ,
-    validate_eeg_frame_payload,
-)
-from eeg_bci_pipeline.gdf_recording import (
+from eeg_bci_pipeline.data.gdf_recording import (
     BCICIV2A_EEG_CHANNEL_COUNT,
     DEFAULT_REPLAY_SAMPLES_PER_FRAME,
     EegRecording,
@@ -26,6 +20,12 @@ from eeg_bci_pipeline.gdf_recording import (
     normalize_channel_labels,
     read_gdf_recording,
     replay_elapsed_sec,
+)
+from eeg_bci_pipeline.eeg_frame_contract import (
+    DEFAULT_EEG_SAMPLING_RATE_HZ,
+    DEFAULT_MAX_ABS_SAMPLE_UV,
+    DEFAULT_SAMPLING_RATE_TOLERANCE_HZ,
+    validate_eeg_frame_payload,
 )
 
 

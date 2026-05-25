@@ -13,7 +13,7 @@ devel/
 
 *.bag
 *.db3
-data/
+/data/
 *.fif
 *.edf
 *.set

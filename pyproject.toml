@@ -1,11 +1,16 @@
 [tool.basedpyright]
+# Strict typing is enforced on pure Python helpers and the offline classifier CLI.
+# ROS node modules are intentionally excluded for now because rclpy parameters and
+# generated message fields currently surface many Unknown types in basedpyright.
 include = [
-  "src/eeg_bci_pipeline/eeg_bci_pipeline/bciciv2a_dataset.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/data/bciciv2a_dataset.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/decoder.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/eeg_frame_contract.py",
-  "src/eeg_bci_pipeline/eeg_bci_pipeline/gdf_recording.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/data/gdf_recording.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/intent_marker_mapping.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/mock_signal.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/training/hand_classifier.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/training/hand_classifier_cli.py",
 ]
 exclude = [
   "**/__pycache__",
@@ -16,7 +21,7 @@ exclude = [
 ]
 extraPaths = ["src/eeg_bci_pipeline"]
 pythonVersion = "3.12"
-typeCheckingMode = "basic"
+typeCheckingMode = "strict"
 reportMissingImports = "warning"
 reportMissingTypeStubs = false
 

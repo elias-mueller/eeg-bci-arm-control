@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Protocol, Sequence, cast
 
 import numpy as np
 
-from eeg_bci_pipeline.gdf_recording import recording_from_mne_raw
+from eeg_bci_pipeline.data.gdf_recording import (
+    FloatArray,
+    MneRawLike,
+    recording_from_mne_raw,
+)
 
 BCICIV2A_CUE_LABELS = {
     "769": "left_hand",
@@ -20,6 +24,15 @@ DEFAULT_EPOCH_TMIN_SEC = 0.0
 DEFAULT_EPOCH_TMAX_SEC = 4.0
 
 
+class MneAnnotationsLike(Protocol):
+    onset: Sequence[float]
+    description: Sequence[str | bytes]
+
+
+class AnnotatedMneRawLike(MneRawLike, Protocol):
+    annotations: MneAnnotationsLike
+
+
 @dataclass(frozen=True)
 class LabeledEpochs:
     source_id: str
@@ -28,7 +41,7 @@ class LabeledEpochs:
     class_labels: tuple[str, ...]
     labels: tuple[str, ...]
     start_sample_indices: tuple[int, ...]
-    epochs_uv: np.ndarray
+    epochs_uv: FloatArray
     skipped_epoch_count: int = 0
 
     @property
@@ -54,7 +67,8 @@ def read_bciciv2a_epochs(
         ) from error
 
     path = Path(gdf_path)
-    raw = mne.io.read_raw_gdf(path, preload=True, verbose="ERROR")
+    read_raw_gdf = cast(Callable[..., AnnotatedMneRawLike], mne.io.read_raw_gdf)
+    raw = read_raw_gdf(path, preload=True, verbose="ERROR")
     return extract_bciciv2a_epochs(
         raw,
         source_id=path.stem,
@@ -66,7 +80,7 @@ def read_bciciv2a_epochs(
 
 
 def extract_bciciv2a_epochs(
-    raw,
+    raw: AnnotatedMneRawLike,
     *,
     source_id: str,
     tmin_sec: float = DEFAULT_EPOCH_TMIN_SEC,
@@ -92,7 +106,7 @@ def extract_bciciv2a_epochs(
     if epoch_samples < 1:
         raise ValueError("epoch duration must contain at least one sample")
 
-    epochs: list[np.ndarray] = []
+    epochs: list[FloatArray] = []
     labels: list[str] = []
     start_indices: list[int] = []
     skipped = 0
@@ -143,7 +157,7 @@ def _selected_class_labels(class_labels: Sequence[str] | None) -> tuple[str, ...
     return selected
 
 
-def _annotation_description_key(description) -> str:
+def _annotation_description_key(description: str | bytes) -> str:
     if isinstance(description, bytes):
         return description.decode()
     return str(description)

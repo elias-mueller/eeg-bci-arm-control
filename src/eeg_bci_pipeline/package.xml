@@ -16,6 +16,7 @@
   <exec_depend>rviz2</exec_depend>
   <exec_depend>python3-mne</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-sklearn</exec_depend>
   <depend>rclpy</depend>
   <depend>visualization_msgs</depend>
   <test_depend>ament_pytest</test_depend>

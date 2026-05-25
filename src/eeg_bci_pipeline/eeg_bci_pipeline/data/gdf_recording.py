@@ -2,15 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Protocol, Sequence, cast
 
 import numpy as np
+import numpy.typing as npt
 
 BCICIV2A_EEG_CHANNEL_COUNT = 22
 DEFAULT_REPLAY_SAMPLES_PER_FRAME = 25
 VOLTS_TO_MICROVOLTS = 1_000_000.0
+
+FloatArray = npt.NDArray[np.float64]
+
+
+class MneRawLike(Protocol):
+    """Small subset of the MNE Raw API used by this package."""
+
+    ch_names: Sequence[str]
+    info: Mapping[str, float]
+
+    def get_channel_types(self) -> Sequence[str]: ...
+
+    def get_data(self, picks: Sequence[str]) -> FloatArray: ...
 
 
 @dataclass(frozen=True)
@@ -18,7 +33,7 @@ class EegRecording:
     source_id: str
     sampling_rate_hz: float
     channel_labels: tuple[str, ...]
-    samples_uv: np.ndarray
+    samples_uv: FloatArray
 
     @property
     def samples_per_channel(self) -> int:
@@ -45,12 +60,13 @@ def read_gdf_recording(
         ) from error
 
     path = Path(gdf_path)
-    raw = mne.io.read_raw_gdf(path, preload=True, verbose="ERROR")
+    read_raw_gdf = cast(Callable[..., MneRawLike], mne.io.read_raw_gdf)
+    raw = read_raw_gdf(path, preload=True, verbose="ERROR")
     return recording_from_mne_raw(raw, source_id=path.stem, channel_labels=channel_labels)
 
 
 def recording_from_mne_raw(
-    raw,
+    raw: MneRawLike,
     *,
     source_id: str,
     channel_labels: Sequence[str] | None = None,
@@ -67,7 +83,10 @@ def recording_from_mne_raw(
         raise ValueError("recording must contain at least one EEG channel")
 
     data_volts = raw.get_data(picks=list(selected_labels))
-    samples_uv = np.asarray(data_volts, dtype=float) * VOLTS_TO_MICROVOLTS
+    samples_uv = cast(
+        FloatArray,
+        np.asarray(data_volts, dtype=np.float64) * VOLTS_TO_MICROVOLTS,
+    )
     return EegRecording(
         source_id=source_id,
         sampling_rate_hz=float(raw.info["sfreq"]),
@@ -134,7 +153,7 @@ def normalize_channel_labels(channel_labels: Sequence[str]) -> tuple[str, ...]:
     return labels
 
 
-def _eeg_channel_labels(raw) -> tuple[str, ...]:
+def _eeg_channel_labels(raw: MneRawLike) -> tuple[str, ...]:
     channel_types = raw.get_channel_types()
     eeg_labels = [
         name

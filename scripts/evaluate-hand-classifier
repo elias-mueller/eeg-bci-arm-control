@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+export PYTHONPATH="$repo_root/src/eeg_bci_pipeline${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m eeg_bci_pipeline.training.hand_classifier_cli "$@"

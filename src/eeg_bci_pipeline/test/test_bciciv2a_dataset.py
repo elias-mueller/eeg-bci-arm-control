@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from eeg_bci_pipeline.bciciv2a_dataset import extract_bciciv2a_epochs
+from eeg_bci_pipeline.data.bciciv2a_dataset import extract_bciciv2a_epochs
 
 
 class FakeAnnotations:
