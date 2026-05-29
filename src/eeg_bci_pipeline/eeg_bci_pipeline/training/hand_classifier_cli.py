@@ -17,6 +17,8 @@ from eeg_bci_pipeline.training.hand_classifier import (
     DEFAULT_HAND_CLASS_LABELS,
     evaluate_hand_classifier,
     format_evaluation_report,
+    save_hand_classifier_artifact,
+    train_hand_classifier,
 )
 
 DEFAULT_EPOCH_TMIN_SEC = 0.5
@@ -26,6 +28,9 @@ DEFAULT_EPOCH_TMAX_SEC = 3.5
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.save_model is not None and args.classifier != "csp-lda":
+        print("--save-model currently supports only --classifier csp-lda", file=sys.stderr)
+        return 1
 
     bandpass_low_hz = None if args.no_bandpass else args.bandpass_low_hz
     bandpass_high_hz = None if args.no_bandpass else args.bandpass_high_hz
@@ -72,6 +77,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     print(format_evaluation_report(evaluation))
+    if args.save_model is not None:
+        artifact = train_hand_classifier(
+            epochs,
+            class_labels=class_labels,
+            csp_components=args.csp_components,
+            bandpass_low_hz=bandpass_low_hz,
+            bandpass_high_hz=bandpass_high_hz,
+            epoch_tmin_sec=args.tmin_sec,
+            epoch_tmax_sec=args.tmax_sec,
+        )
+        args.save_model.parent.mkdir(parents=True, exist_ok=True)
+        save_hand_classifier_artifact(artifact, args.save_model)
+        print(f"saved model: {args.save_model}")
     return 0
 
 
@@ -101,6 +119,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--csp-components", type=int, default=DEFAULT_CSP_COMPONENTS)
     parser.add_argument("--cv-splits", type=int, default=DEFAULT_CV_SPLITS)
     parser.add_argument("--cv-random-state", type=int, default=DEFAULT_CV_RANDOM_STATE)
+    parser.add_argument(
+        "--save-model",
+        type=Path,
+        help="Fit a final CSP+LDA model on all selected epochs and save it to this path.",
+    )
     parser.add_argument("--bandpass-low-hz", type=float, default=DEFAULT_BANDPASS_LOW_HZ)
     parser.add_argument("--bandpass-high-hz", type=float, default=DEFAULT_BANDPASS_HIGH_HZ)
     parser.add_argument(

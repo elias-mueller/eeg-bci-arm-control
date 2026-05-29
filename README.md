@@ -49,7 +49,9 @@ scripts/test
 - `scripts/run-robot`: launch the mock pipeline with the Panda-style robot state publisher
 - `scripts/run-robot-rviz`: launch the mock robot pipeline and RViz robot visualization
 - `scripts/run-bciciv2a`: replay a BCI Competition IV 2a GDF recording into the pipeline
-- `scripts/evaluate-hand-classifier`: evaluate an offline BCIC IV 2a left/right CSP + LDA baseline
+- `scripts/evaluate-hand-classifier`: evaluate an offline BCIC IV 2a left/right CSP + LDA
+  baseline; pass `--save-model path/to/model.joblib` to also fit and save one final CSP+LDA
+  calibration artifact
 - `scripts/lint`: check Python formatting/imports and Ruff lint rules
 - `scripts/format`: format Python files and sort imports with Ruff
 - `scripts/typecheck`: run basedpyright on the pure Python pipeline helpers

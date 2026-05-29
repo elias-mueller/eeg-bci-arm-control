@@ -5,7 +5,11 @@ from eeg_bci_pipeline.training.hand_classifier import (
     HandClassifierEvaluation,
     evaluate_hand_classifier,
     format_evaluation_report,
+    load_hand_classifier_artifact,
+    predict_hand_classifier,
+    save_hand_classifier_artifact,
     select_hand_epochs,
+    train_hand_classifier,
 )
 
 
@@ -70,6 +74,49 @@ def test_evaluate_hand_classifier_reports_cross_validation_metadata():
     assert evaluation.cv_splits == 4
     assert len(evaluation.fold_scores) == 4
     assert 0.0 <= evaluation.mean_accuracy <= 1.0
+
+
+def test_train_hand_classifier_saves_loads_and_predicts(tmp_path):
+    labels = ("left_hand", "right_hand") * 8
+    epochs = make_labeled_epochs(labels)
+    artifact = train_hand_classifier(
+        epochs,
+        csp_components=2,
+        bandpass_low_hz=None,
+        bandpass_high_hz=None,
+        epoch_tmin_sec=0.5,
+        epoch_tmax_sec=3.5,
+    )
+
+    output_path = tmp_path / "hand-csp-lda.joblib"
+    save_hand_classifier_artifact(artifact, output_path)
+    loaded = load_hand_classifier_artifact(output_path)
+    training_data = select_hand_epochs(epochs)
+
+    assert loaded.source_id == "synthetic"
+    assert loaded.channel_labels == ("C3", "Cz", "C4", "Pz")
+    assert loaded.class_labels == ("left_hand", "right_hand")
+    assert loaded.samples_per_epoch == 100
+    assert loaded.epoch_tmin_sec == 0.5
+    assert loaded.epoch_tmax_sec == 3.5
+    assert predict_hand_classifier(loaded, training_data.epochs_uv) == predict_hand_classifier(
+        artifact,
+        training_data.epochs_uv,
+    )
+
+
+def test_predict_hand_classifier_rejects_epoch_shape_mismatch():
+    labels = ("left_hand", "right_hand") * 4
+    epochs = make_labeled_epochs(labels)
+    artifact = train_hand_classifier(
+        epochs,
+        csp_components=2,
+        bandpass_low_hz=None,
+        bandpass_high_hz=None,
+    )
+
+    with pytest.raises(ValueError, match="sample count"):
+        predict_hand_classifier(artifact, epochs.epochs_uv[:, :, :-1])
 
 
 def test_format_evaluation_report_includes_classifier_summary():

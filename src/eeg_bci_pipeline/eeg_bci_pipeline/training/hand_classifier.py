@@ -5,7 +5,8 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Sequence, cast
+from pathlib import Path
+from typing import Any, Protocol, Sequence, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -19,11 +20,20 @@ DEFAULT_BANDPASS_HIGH_HZ = 30.0
 DEFAULT_CSP_COMPONENTS = 4
 DEFAULT_CV_SPLITS = 5
 DEFAULT_CV_RANDOM_STATE = 7
+HAND_CLASSIFIER_ARTIFACT_VERSION = 1
 
 IntArray = npt.NDArray[np.int_]
 FoldScorer = Callable[[int, FloatArray, IntArray, FloatArray, IntArray], float]
 PipelineFactory = Callable[..., object]
 FilterData = Callable[..., FloatArray]
+FitPipeline = Callable[[FloatArray, IntArray], object]
+PredictPipeline = Callable[[FloatArray], IntArray]
+
+
+class JoblibLike(Protocol):
+    def dump(self, value: object, filename: str | Path) -> object: ...
+
+    def load(self, filename: str | Path) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -67,6 +77,30 @@ class HandClassifierEvaluation:
     bandpass_high_hz: float | None = DEFAULT_BANDPASS_HIGH_HZ
 
 
+@dataclass(frozen=True)
+class HandClassifierArtifact:
+    """A final-fit classifier and the runtime contract needed to use it."""
+
+    source_id: str
+    sampling_rate_hz: float
+    channel_labels: tuple[str, ...]
+    class_labels: tuple[str, ...]
+    class_counts: tuple[int, ...]
+    samples_per_epoch: int
+    pipeline: object
+    epoch_tmin_sec: float | None = None
+    epoch_tmax_sec: float | None = None
+    classifier_name: str = "csp-lda"
+    csp_components: int = DEFAULT_CSP_COMPONENTS
+    bandpass_low_hz: float | None = DEFAULT_BANDPASS_LOW_HZ
+    bandpass_high_hz: float | None = DEFAULT_BANDPASS_HIGH_HZ
+    artifact_version: int = HAND_CLASSIFIER_ARTIFACT_VERSION
+
+    @property
+    def channel_count(self) -> int:
+        return len(self.channel_labels)
+
+
 def select_hand_epochs(
     labeled_epochs: LabeledEpochs,
     *,
@@ -107,6 +141,102 @@ def select_hand_epochs(
         epochs_uv=np.asarray(labeled_epochs.epochs_uv[selected_indices], dtype=np.float64),
         encoded_labels=np.asarray(encoded_labels, dtype=np.int_),
     )
+
+
+def train_hand_classifier(
+    labeled_epochs: LabeledEpochs,
+    *,
+    class_labels: Sequence[str] = DEFAULT_HAND_CLASS_LABELS,
+    csp_components: int = DEFAULT_CSP_COMPONENTS,
+    bandpass_low_hz: float | None = DEFAULT_BANDPASS_LOW_HZ,
+    bandpass_high_hz: float | None = DEFAULT_BANDPASS_HIGH_HZ,
+    epoch_tmin_sec: float | None = None,
+    epoch_tmax_sec: float | None = None,
+) -> HandClassifierArtifact:
+    """Fit one deployable CSP + LDA classifier on all calibration epochs."""
+
+    training_data = select_hand_epochs(labeled_epochs, class_labels=class_labels)
+    _validate_csp_components(csp_components, channel_count=training_data.channel_count)
+
+    try:
+        from mne import use_log_level
+    except ImportError as error:
+        raise RuntimeError(
+            "Hand classifier training requires MNE and scikit-learn. "
+            "Install: python3-mne python3-sklearn"
+        ) from error
+
+    epochs_uv = maybe_bandpass_epochs(
+        training_data.epochs_uv,
+        sampling_rate_hz=training_data.sampling_rate_hz,
+        low_hz=bandpass_low_hz,
+        high_hz=bandpass_high_hz,
+    )
+    pipeline = build_csp_lda_pipeline(csp_components=csp_components)
+    fit = cast(FitPipeline, getattr(pipeline, "fit"))
+    with use_log_level("ERROR"):
+        fit(epochs_uv, training_data.encoded_labels)
+
+    return HandClassifierArtifact(
+        source_id=training_data.source_id,
+        sampling_rate_hz=training_data.sampling_rate_hz,
+        channel_labels=training_data.channel_labels,
+        class_labels=training_data.class_labels,
+        class_counts=training_data.class_counts,
+        samples_per_epoch=training_data.samples_per_epoch,
+        pipeline=pipeline,
+        epoch_tmin_sec=epoch_tmin_sec,
+        epoch_tmax_sec=epoch_tmax_sec,
+        csp_components=csp_components,
+        bandpass_low_hz=bandpass_low_hz,
+        bandpass_high_hz=bandpass_high_hz,
+    )
+
+
+def save_hand_classifier_artifact(
+    artifact: HandClassifierArtifact,
+    output_path: str | Path,
+) -> None:
+    """Persist a trained hand classifier artifact."""
+
+    _joblib().dump(artifact, Path(output_path))
+
+
+def load_hand_classifier_artifact(path: str | Path) -> HandClassifierArtifact:
+    """Load and validate a persisted hand classifier artifact."""
+
+    artifact = _joblib().load(Path(path))
+    if not isinstance(artifact, HandClassifierArtifact):
+        raise ValueError("artifact does not contain a hand classifier")
+    if artifact.artifact_version != HAND_CLASSIFIER_ARTIFACT_VERSION:
+        raise ValueError(
+            f"unsupported hand classifier artifact version: {artifact.artifact_version}"
+        )
+    return artifact
+
+
+def predict_hand_classifier(
+    artifact: HandClassifierArtifact,
+    epochs_uv: FloatArray,
+) -> tuple[str, ...]:
+    """Predict class labels for epoch-shaped EEG windows with a saved artifact."""
+
+    epochs = _validate_artifact_epoch_shape(artifact, epochs_uv)
+    prepared_epochs = maybe_bandpass_epochs(
+        epochs,
+        sampling_rate_hz=artifact.sampling_rate_hz,
+        low_hz=artifact.bandpass_low_hz,
+        high_hz=artifact.bandpass_high_hz,
+    )
+    predict = cast(PredictPipeline, getattr(artifact.pipeline, "predict"))
+    predicted_indices = np.asarray(predict(prepared_epochs), dtype=np.int_)
+    labels: list[str] = []
+    for class_index in predicted_indices:
+        index = int(class_index)
+        if index < 0 or index >= len(artifact.class_labels):
+            raise ValueError(f"classifier predicted unknown class index: {index}")
+        labels.append(artifact.class_labels[index])
+    return tuple(labels)
 
 
 def evaluate_hand_classifier(
@@ -324,6 +454,26 @@ def _validate_csp_components(csp_components: int, *, channel_count: int) -> None
         raise ValueError("csp_components must not exceed channel count")
 
 
+def _validate_artifact_epoch_shape(
+    artifact: HandClassifierArtifact,
+    epochs_uv: FloatArray,
+) -> FloatArray:
+    epochs = np.asarray(epochs_uv, dtype=np.float64)
+    if epochs.ndim != 3:
+        raise ValueError("epochs must have shape (n_epochs, n_channels, n_samples)")
+    if epochs.shape[1] != artifact.channel_count:
+        raise ValueError(
+            "epoch channel count does not match artifact: "
+            f"{epochs.shape[1]} != {artifact.channel_count}"
+        )
+    if epochs.shape[2] != artifact.samples_per_epoch:
+        raise ValueError(
+            "epoch sample count does not match artifact: "
+            f"{epochs.shape[2]} != {artifact.samples_per_epoch}"
+        )
+    return epochs
+
+
 def _make_pipeline() -> PipelineFactory:
     return cast(
         PipelineFactory,
@@ -338,3 +488,10 @@ def _filter_data() -> FilterData:
         raise RuntimeError("Bandpass filtering requires MNE. Install: python3-mne") from error
 
     return cast(FilterData, getattr(filter_module, "filter_data"))
+
+
+def _joblib() -> JoblibLike:
+    try:
+        return cast(JoblibLike, importlib.import_module("joblib"))
+    except ImportError as error:
+        raise RuntimeError("Model persistence requires joblib. Install: python3-joblib") from error
