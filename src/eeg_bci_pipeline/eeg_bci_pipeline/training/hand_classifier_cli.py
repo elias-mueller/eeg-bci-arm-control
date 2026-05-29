@@ -59,7 +59,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             weight_decay=args.weight_decay,
             n_epochs=args.training_epochs,
             batch_size=args.batch_size,
-            patience=args.patience,
         )
     else:
         evaluation = evaluate_hand_classifier(
@@ -119,7 +118,6 @@ def _build_parser() -> argparse.ArgumentParser:
     eegnet.add_argument("--weight-decay", type=float, default=1e-2)
     eegnet.add_argument("--training-epochs", type=int, default=200)
     eegnet.add_argument("--batch-size", type=int, default=32)
-    eegnet.add_argument("--patience", type=int, default=20)
 
     return parser
 

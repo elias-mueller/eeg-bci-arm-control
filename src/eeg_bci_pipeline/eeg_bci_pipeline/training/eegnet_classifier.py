@@ -40,7 +40,6 @@ DEFAULT_LEARNING_RATE = 1e-3
 DEFAULT_WEIGHT_DECAY = 1e-2
 DEFAULT_TRAINING_EPOCHS = 200
 DEFAULT_BATCH_SIZE = 32
-DEFAULT_PATIENCE = 20
 
 # Fraction of each training fold held out (stratified) as an inner validation
 # set for early stopping, so the outer CV fold stays untouched until scoring.
@@ -63,7 +62,6 @@ def evaluate_eegnet_classifier(
     weight_decay: float = DEFAULT_WEIGHT_DECAY,
     n_epochs: int = DEFAULT_TRAINING_EPOCHS,
     batch_size: int = DEFAULT_BATCH_SIZE,
-    patience: int = DEFAULT_PATIENCE,
 ) -> HandClassifierEvaluation:
     """Evaluate an EEGNet classifier with stratified cross-validation."""
 
@@ -78,6 +76,12 @@ def evaluate_eegnet_classifier(
         val_labels: IntArray,
     ) -> float:
         torch.manual_seed(cv_random_state + fold_index)  # pyright: ignore[reportUnknownMemberType]
+
+        # Standardize per channel using training-fold statistics only, then
+        # apply the same shift/scale to the held-out fold (no leakage).
+        channel_mean, channel_std = _fit_channel_stats(train_epochs_uv)
+        train_epochs_uv = _apply_channel_stats(train_epochs_uv, channel_mean, channel_std)
+        val_epochs_uv = _apply_channel_stats(val_epochs_uv, channel_mean, channel_std)
 
         (
             inner_train_uv,
@@ -112,7 +116,6 @@ def evaluate_eegnet_classifier(
             weight_decay=weight_decay,
             n_epochs=n_epochs,
             batch_size=batch_size,
-            patience=patience,
         )
 
         # Score the untouched outer fold exactly once.
@@ -145,13 +148,14 @@ def train_eegnet_fold(
     weight_decay: float,
     n_epochs: int,
     batch_size: int,
-    patience: int,
 ) -> None:
-    """Train ``model`` in place, early-stopping on the given validation set.
+    """Train ``model`` for ``n_epochs`` and restore its best checkpoint.
 
-    The lowest-validation-loss checkpoint is restored before returning. The
-    validation set is an inner split of the training fold, never the outer CV
-    fold used for scoring, so the reported accuracy stays unbiased.
+    The lowest-validation-loss checkpoint (on an inner split of the training
+    fold, never the outer CV fold) is restored before returning, so the reported
+    accuracy stays unbiased. Training runs the full schedule with no early stop:
+    on small folds the inner-val loss often worsens for tens of epochs before
+    recovering, so stopping early restored a near-random checkpoint.
     """
 
     train_x = _epochs_to_tensor(train_epochs_uv).to(device)
@@ -170,7 +174,6 @@ def train_eegnet_fold(
 
     best_val_loss = float("inf")
     best_state: dict[str, Any] | None = None
-    epochs_without_improvement = 0
 
     for _epoch in range(n_epochs):
         model.train()
@@ -187,14 +190,22 @@ def train_eegnet_fold(
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_state = copy.deepcopy(model.state_dict())
-            epochs_without_improvement = 0
-        else:
-            epochs_without_improvement += 1
-            if epochs_without_improvement >= patience:
-                break
 
     if best_state is not None:
         model.load_state_dict(best_state)
+
+
+def _fit_channel_stats(epochs_uv: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Per-channel mean and std over the training epochs (epoch and time axes)."""
+    mean = epochs_uv.mean(axis=(0, 2), keepdims=True)
+    std = epochs_uv.std(axis=(0, 2), keepdims=True)
+    std[std == 0.0] = 1.0
+    return mean, std
+
+
+def _apply_channel_stats(epochs_uv: FloatArray, mean: FloatArray, std: FloatArray) -> FloatArray:
+    """Z-score epochs with precomputed per-channel statistics."""
+    return (epochs_uv - mean) / std
 
 
 def _stratified_holdout(

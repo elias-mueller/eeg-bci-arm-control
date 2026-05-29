@@ -4,7 +4,9 @@ import pytest
 torch = pytest.importorskip("torch")
 from eeg_bci_pipeline.data.bciciv2a_dataset import LabeledEpochs  # noqa: E402
 from eeg_bci_pipeline.training.eegnet_classifier import (  # noqa: E402
+    _apply_channel_stats,
     _epochs_to_tensor,
+    _fit_channel_stats,
     evaluate_eegnet_classifier,
 )
 
@@ -42,6 +44,26 @@ def test_epochs_to_tensor_adds_channel_dimension():
     assert np.allclose(tensor.numpy()[:, 0, :, :], arr, atol=1e-5)
 
 
+def test_channel_stats_standardize_per_channel():
+    rng = np.random.default_rng(0)
+    epochs = rng.normal(loc=5.0, scale=3.0, size=(20, 4, 64))
+
+    mean, std = _fit_channel_stats(epochs)
+    standardized = _apply_channel_stats(epochs, mean, std)
+
+    assert mean.shape == (1, 4, 1)
+    assert np.allclose(standardized.mean(axis=(0, 2)), 0.0, atol=1e-6)
+    assert np.allclose(standardized.std(axis=(0, 2)), 1.0, atol=1e-6)
+
+
+def test_fit_channel_stats_guards_zero_variance_channel():
+    epochs = np.ones((5, 3, 16))
+
+    _, std = _fit_channel_stats(epochs)
+
+    assert np.all(std == 1.0)
+
+
 def test_evaluate_eegnet_classifier_reports_cross_validation_metadata():
     labels = ("left_hand", "right_hand") * 8
     epochs = make_labeled_epochs(labels)
@@ -53,7 +75,6 @@ def test_evaluate_eegnet_classifier_reports_cross_validation_metadata():
         bandpass_high_hz=None,
         n_epochs=5,
         batch_size=4,
-        patience=3,
         kernel_length=32,
     )
 
@@ -75,7 +96,6 @@ def test_evaluate_eegnet_classifier_learns_above_chance_on_separable_classes():
         bandpass_high_hz=None,
         n_epochs=60,
         batch_size=4,
-        patience=15,
         kernel_length=32,
     )
 
@@ -93,7 +113,6 @@ def test_evaluate_eegnet_classifier_caps_cv_splits_to_min_class_count():
         bandpass_high_hz=None,
         n_epochs=3,
         batch_size=2,
-        patience=2,
         kernel_length=32,
     )
 
