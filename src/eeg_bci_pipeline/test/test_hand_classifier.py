@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from eeg_bci_pipeline.data.bciciv2a_dataset import LabeledEpochs
 from eeg_bci_pipeline.training.hand_classifier import (
+    HandClassifierEvaluation,
     evaluate_hand_classifier,
     format_evaluation_report,
     select_hand_epochs,
@@ -88,3 +89,24 @@ def test_format_evaluation_report_includes_classifier_summary():
     assert "left_hand" in report
     assert "right_hand" in report
     assert "mean accuracy" in report
+
+
+def test_format_evaluation_report_eegnet_omits_csp_components():
+    evaluation = HandClassifierEvaluation(
+        source_id="synthetic",
+        sampling_rate_hz=128.0,
+        channel_count=4,
+        samples_per_epoch=128,
+        class_labels=("left_hand", "right_hand"),
+        class_counts=(8, 8),
+        cv_splits=2,
+        fold_scores=(0.5, 0.6),
+        mean_accuracy=0.55,
+        std_accuracy=0.05,
+        classifier_name="eegnet",
+    )
+
+    report = format_evaluation_report(evaluation)
+
+    assert "Hand classifier evaluation (eegnet)" in report
+    assert "csp components" not in report

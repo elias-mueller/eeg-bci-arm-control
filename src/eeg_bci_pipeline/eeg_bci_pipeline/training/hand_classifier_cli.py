@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -35,27 +36,60 @@ def main(argv: Sequence[str] | None = None) -> int:
         tmax_sec=args.tmax_sec,
         class_labels=class_labels,
     )
-    evaluation = evaluate_hand_classifier(
-        epochs,
-        class_labels=class_labels,
-        csp_components=args.csp_components,
-        cv_splits=args.cv_splits,
-        cv_random_state=args.cv_random_state,
-        bandpass_low_hz=bandpass_low_hz,
-        bandpass_high_hz=bandpass_high_hz,
-    )
+
+    if args.classifier == "eegnet":
+        try:
+            from eeg_bci_pipeline.training.eegnet_classifier import evaluate_eegnet_classifier
+        except RuntimeError as error:
+            print(error, file=sys.stderr)
+            return 1
+
+        evaluation = evaluate_eegnet_classifier(
+            epochs,
+            class_labels=class_labels,
+            cv_splits=args.cv_splits,
+            cv_random_state=args.cv_random_state,
+            bandpass_low_hz=bandpass_low_hz,
+            bandpass_high_hz=bandpass_high_hz,
+            f1=args.f1,
+            d=args.depth_multiplier,
+            kernel_length=args.kernel_length,
+            dropout_rate=args.dropout_rate,
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+            n_epochs=args.training_epochs,
+            batch_size=args.batch_size,
+            patience=args.patience,
+        )
+    else:
+        evaluation = evaluate_hand_classifier(
+            epochs,
+            class_labels=class_labels,
+            csp_components=args.csp_components,
+            cv_splits=args.cv_splits,
+            cv_random_state=args.cv_random_state,
+            bandpass_low_hz=bandpass_low_hz,
+            bandpass_high_hz=bandpass_high_hz,
+        )
+
     print(format_evaluation_report(evaluation))
     return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Evaluate an offline CSP + LDA hand classifier on BCIC IV 2a data."
+        description="Evaluate an offline hand classifier on BCIC IV 2a data."
     )
     parser.add_argument(
         "gdf_path",
         type=Path,
         help="Path to a BCIC IV 2a GDF recording, for example data/raw/bciciv2a/A01T.gdf.",
+    )
+    parser.add_argument(
+        "--classifier",
+        choices=["csp-lda", "eegnet"],
+        default="csp-lda",
+        help="Classifier to evaluate. Default: csp-lda.",
     )
     parser.add_argument("--tmin-sec", type=float, default=DEFAULT_EPOCH_TMIN_SEC)
     parser.add_argument("--tmax-sec", type=float, default=DEFAULT_EPOCH_TMAX_SEC)
@@ -75,6 +109,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable the default bandpass filter.",
     )
+
+    eegnet = parser.add_argument_group("eegnet", "EEGNet-specific options")
+    eegnet.add_argument("--f1", type=int, default=8)
+    eegnet.add_argument("--depth-multiplier", type=int, default=2)
+    eegnet.add_argument("--kernel-length", type=int, default=125)
+    eegnet.add_argument("--dropout-rate", type=float, default=0.5)
+    eegnet.add_argument("--learning-rate", type=float, default=1e-3)
+    eegnet.add_argument("--weight-decay", type=float, default=1e-2)
+    eegnet.add_argument("--training-epochs", type=int, default=200)
+    eegnet.add_argument("--batch-size", type=int, default=32)
+    eegnet.add_argument("--patience", type=int, default=20)
+
     return parser
 
 

@@ -11,6 +11,8 @@ include = [
   "src/eeg_bci_pipeline/eeg_bci_pipeline/mock_signal.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/training/hand_classifier.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/training/hand_classifier_cli.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/training/eegnet.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/training/eegnet_classifier.py",
 ]
 exclude = [
   "**/__pycache__",

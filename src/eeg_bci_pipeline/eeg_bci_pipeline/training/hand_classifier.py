@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Sequence, cast
+from typing import Any, Sequence, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -21,7 +21,7 @@ DEFAULT_CV_SPLITS = 5
 DEFAULT_CV_RANDOM_STATE = 7
 
 IntArray = npt.NDArray[np.int_]
-CrossValScore = Callable[..., FloatArray]
+FoldScorer = Callable[[int, FloatArray, IntArray, FloatArray, IntArray], float]
 PipelineFactory = Callable[..., object]
 FilterData = Callable[..., FloatArray]
 
@@ -57,11 +57,12 @@ class HandClassifierEvaluation:
     samples_per_epoch: int
     class_labels: tuple[str, ...]
     class_counts: tuple[int, ...]
-    csp_components: int
     cv_splits: int
     fold_scores: tuple[float, ...]
     mean_accuracy: float
     std_accuracy: float
+    classifier_name: str = "csp-lda"
+    csp_components: int = 0
     bandpass_low_hz: float | None = DEFAULT_BANDPASS_LOW_HZ
     bandpass_high_hz: float | None = DEFAULT_BANDPASS_HIGH_HZ
 
@@ -122,40 +123,94 @@ def evaluate_hand_classifier(
 
     training_data = select_hand_epochs(labeled_epochs, class_labels=class_labels)
     _validate_csp_components(csp_components, channel_count=training_data.channel_count)
-    resolved_cv_splits = _resolve_cv_splits(cv_splits, training_data.class_counts)
-    epochs_uv = _maybe_bandpass_epochs(
-        training_data.epochs_uv,
-        sampling_rate_hz=training_data.sampling_rate_hz,
-        low_hz=bandpass_low_hz,
-        high_hz=bandpass_high_hz,
-    )
 
     try:
         from mne import use_log_level
-        from sklearn.model_selection import StratifiedKFold
     except ImportError as error:
         raise RuntimeError(
             "Hand classifier evaluation requires MNE and scikit-learn. "
             "Install: python3-mne python3-sklearn"
         ) from error
 
-    pipeline = build_csp_lda_pipeline(csp_components=csp_components)
+    def score_fold(
+        _fold_index: int,
+        train_epochs_uv: FloatArray,
+        train_labels: IntArray,
+        val_epochs_uv: FloatArray,
+        val_labels: IntArray,
+    ) -> float:
+        pipeline = cast(Any, build_csp_lda_pipeline(csp_components=csp_components))
+        with use_log_level("ERROR"):
+            pipeline.fit(train_epochs_uv, train_labels)
+            return float(pipeline.score(val_epochs_uv, val_labels))
+
+    return cross_validate_folds(
+        training_data,
+        classifier_name="csp-lda",
+        csp_components=csp_components,
+        cv_splits=cv_splits,
+        cv_random_state=cv_random_state,
+        bandpass_low_hz=bandpass_low_hz,
+        bandpass_high_hz=bandpass_high_hz,
+        score_fold=score_fold,
+    )
+
+
+def cross_validate_folds(
+    training_data: HandTrainingData,
+    *,
+    classifier_name: str,
+    cv_splits: int,
+    cv_random_state: int,
+    bandpass_low_hz: float | None,
+    bandpass_high_hz: float | None,
+    score_fold: FoldScorer,
+    csp_components: int = 0,
+) -> HandClassifierEvaluation:
+    """Run stratified k-fold CV, scoring each fold with ``score_fold``.
+
+    ``score_fold`` receives ``(fold_index, train_epochs_uv, train_labels,
+    val_epochs_uv, val_labels)`` and returns that fold's accuracy. Shared by the
+    CSP+LDA and EEGNet evaluators so the bandpass, fold splitting, and report
+    assembly live in one place.
+    """
+
+    epochs_uv = maybe_bandpass_epochs(
+        training_data.epochs_uv,
+        sampling_rate_hz=training_data.sampling_rate_hz,
+        low_hz=bandpass_low_hz,
+        high_hz=bandpass_high_hz,
+    )
+    resolved_cv_splits = resolve_cv_splits(cv_splits, training_data.class_counts)
+
+    try:
+        from sklearn.model_selection import StratifiedKFold
+    except ImportError as error:
+        raise RuntimeError(
+            "Cross-validation requires scikit-learn. Install: python3-sklearn"
+        ) from error
+
     cv = StratifiedKFold(
         n_splits=resolved_cv_splits,
         shuffle=True,
         random_state=cv_random_state,
     )
-    cross_val_score_typed = _cross_val_score()
-    with use_log_level("ERROR"):
-        scores = cross_val_score_typed(
-            pipeline,
-            epochs_uv,
-            training_data.encoded_labels,
-            cv=cv,
-            scoring="accuracy",
-            error_score="raise",
+    labels = training_data.encoded_labels
+    fold_scores: list[float] = []
+    for fold_index, (train_idx, val_idx) in enumerate(
+        cv.split(epochs_uv, labels)  # pyright: ignore[reportUnknownMemberType]
+    ):
+        fold_scores.append(
+            score_fold(
+                fold_index,
+                epochs_uv[train_idx],
+                labels[train_idx],
+                epochs_uv[val_idx],
+                labels[val_idx],
+            )
         )
-    fold_scores = tuple(float(score) for score in scores)
+
+    scores = np.array(fold_scores)
     return HandClassifierEvaluation(
         source_id=training_data.source_id,
         sampling_rate_hz=training_data.sampling_rate_hz,
@@ -163,11 +218,12 @@ def evaluate_hand_classifier(
         samples_per_epoch=training_data.samples_per_epoch,
         class_labels=training_data.class_labels,
         class_counts=training_data.class_counts,
-        csp_components=csp_components,
         cv_splits=resolved_cv_splits,
-        fold_scores=fold_scores,
+        fold_scores=tuple(fold_scores),
         mean_accuracy=float(np.mean(scores)),
         std_accuracy=float(np.std(scores)),
+        classifier_name=classifier_name,
+        csp_components=csp_components,
         bandpass_low_hz=bandpass_low_hz,
         bandpass_high_hz=bandpass_high_hz,
     )
@@ -203,7 +259,7 @@ def format_evaluation_report(evaluation: HandClassifierEvaluation) -> str:
 
     fold_scores = ", ".join(f"{score:.3f}" for score in evaluation.fold_scores)
     lines = [
-        "Hand classifier evaluation",
+        f"Hand classifier evaluation ({evaluation.classifier_name})",
         f"source: {evaluation.source_id}",
         f"classes: {', '.join(evaluation.class_labels)}",
         "class counts:",
@@ -212,7 +268,10 @@ def format_evaluation_report(evaluation: HandClassifierEvaluation) -> str:
         f"shape: {evaluation.channel_count} channels x {evaluation.samples_per_epoch} samples",
         f"sampling rate: {evaluation.sampling_rate_hz:g} Hz",
         f"bandpass: {bandpass}",
-        f"csp components: {evaluation.csp_components}",
+    ]
+    if evaluation.classifier_name == "csp-lda":
+        lines.append(f"csp components: {evaluation.csp_components}")
+    lines += [
         f"cv splits: {evaluation.cv_splits}",
         f"fold accuracies: {fold_scores}",
         f"mean accuracy: {evaluation.mean_accuracy:.3f} +/- {evaluation.std_accuracy:.3f}",
@@ -220,7 +279,7 @@ def format_evaluation_report(evaluation: HandClassifierEvaluation) -> str:
     return "\n".join(lines)
 
 
-def _maybe_bandpass_epochs(
+def maybe_bandpass_epochs(
     epochs_uv: FloatArray,
     *,
     sampling_rate_hz: float,
@@ -248,7 +307,7 @@ def _maybe_bandpass_epochs(
     )
 
 
-def _resolve_cv_splits(requested_splits: int, class_counts: Sequence[int]) -> int:
+def resolve_cv_splits(requested_splits: int, class_counts: Sequence[int]) -> int:
     if requested_splits < 2:
         raise ValueError("cv_splits must be at least 2")
 
@@ -263,13 +322,6 @@ def _validate_csp_components(csp_components: int, *, channel_count: int) -> None
         raise ValueError("csp_components must be at least 1")
     if csp_components > channel_count:
         raise ValueError("csp_components must not exceed channel count")
-
-
-def _cross_val_score() -> CrossValScore:
-    return cast(
-        CrossValScore,
-        getattr(importlib.import_module("sklearn.model_selection"), "cross_val_score"),
-    )
 
 
 def _make_pipeline() -> PipelineFactory:
