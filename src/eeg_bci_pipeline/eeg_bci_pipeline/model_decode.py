@@ -101,6 +101,28 @@ def rest_intent(
     )
 
 
+def runtime_labels_for_artifact(model_class_labels: Sequence[str]) -> tuple[str, ...]:
+    """Build the runtime intent label set for a model's classes.
+
+    ``gate_intent``/``rest_intent`` require ``rest`` to be present in the runtime
+    set and every winning model label to be a member of it. Hand models
+    (``left_hand``/``right_hand``) carry no ``rest`` class — rest is synthesized by
+    confidence gating — so it is prepended; a model that already predicts ``rest``
+    is used unchanged. Deriving the set from the artifact (rather than assuming the
+    default hand vocabulary) keeps a model trained on other labels from making
+    ``gate_intent`` raise on its own winning label mid-stream.
+    """
+
+    labels = [str(label) for label in model_class_labels]
+    if not labels:
+        raise ValueError("model_class_labels must be non-empty")
+    if len(set(labels)) != len(labels):
+        raise ValueError("model_class_labels must be unique")
+    if REST_LABEL in labels:
+        return tuple(labels)
+    return (REST_LABEL, *labels)
+
+
 def gate_intent(
     probabilities: Sequence[float],
     model_class_labels: Sequence[str],

@@ -5,6 +5,7 @@ from eeg_bci_pipeline.model_decode import (
     SlidingEpochBuffer,
     decode_window,
     gate_intent,
+    runtime_labels_for_artifact,
 )
 from eeg_bci_pipeline.training.hand_classifier import train_hand_classifier
 
@@ -74,6 +75,40 @@ def test_sliding_buffer_reset_returns_to_warmup():
     buffer.reset()
     assert not buffer.is_full
     assert buffer.push([5.0, 6.0]) is None  # 1 sample/channel → still warming up
+
+
+def test_runtime_labels_prepend_rest_for_hand_model():
+    assert runtime_labels_for_artifact(("left_hand", "right_hand")) == (
+        "rest",
+        "left_hand",
+        "right_hand",
+    )
+
+
+def test_runtime_labels_passthrough_when_model_already_has_rest():
+    assert runtime_labels_for_artifact(("rest", "left_hand", "right_hand")) == (
+        "rest",
+        "left_hand",
+        "right_hand",
+    )
+
+
+def test_runtime_labels_accept_nonstandard_classes_without_gate_crash():
+    # Regression: model_intent_decoder used to hardcode the runtime set to
+    # rest/left_hand/right_hand, so an artifact trained on other classes made
+    # gate_intent raise on its own winning label. Deriving the set keeps the winner
+    # in range.
+    labels = runtime_labels_for_artifact(("feet", "tongue"))
+    assert labels == ("rest", "feet", "tongue")
+    intent = gate_intent([0.9, 0.1], ("feet", "tongue"), runtime_class_labels=labels)
+    assert intent.label == "feet"
+
+
+def test_runtime_labels_reject_empty_and_duplicates():
+    with pytest.raises(ValueError, match="non-empty"):
+        runtime_labels_for_artifact(())
+    with pytest.raises(ValueError, match="unique"):
+        runtime_labels_for_artifact(("left_hand", "left_hand"))
 
 
 def test_gate_intent_reports_confident_winner():

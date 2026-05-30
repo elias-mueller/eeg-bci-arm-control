@@ -16,7 +16,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
 from eeg_bci_interfaces.msg import EegFrame, Intent
-from eeg_bci_pipeline.decoder import DEFAULT_CLASS_LABELS, IntentPrediction
+from eeg_bci_pipeline.decoder import IntentPrediction
 from eeg_bci_pipeline.eeg_frame_contract import (
     DEFAULT_MAX_ABS_SAMPLE_UV,
     DEFAULT_SAMPLING_RATE_TOLERANCE_HZ,
@@ -28,6 +28,7 @@ from eeg_bci_pipeline.model_decode import (
     SlidingEpochBuffer,
     decode_window,
     rest_intent,
+    runtime_labels_for_artifact,
 )
 from eeg_bci_pipeline.training.hand_classifier import load_hand_classifier_artifact
 
@@ -65,7 +66,10 @@ class ModelIntentDecoder(Node):
         # Loading fails loudly (missing/corrupt/unsupported artifact) — this node is
         # only launched when real model decoding is intended.
         self._artifact = load_hand_classifier_artifact(model_path)
-        self._runtime_class_labels = DEFAULT_CLASS_LABELS
+        # Derive the runtime intent vocabulary (rest + the model's classes) from the
+        # artifact instead of assuming the default hand set, so an artifact trained on
+        # other labels can't make gate_intent raise on its own winning label mid-stream.
+        self._runtime_class_labels = runtime_labels_for_artifact(self._artifact.class_labels)
         self._buffer = SlidingEpochBuffer(
             self._artifact.channel_count,
             self._artifact.samples_per_epoch,
@@ -93,6 +97,7 @@ class ModelIntentDecoder(Node):
             f"Decoding EEG frames from {input_topic} to intents on {output_topic} "
             f"(rest threshold {self._rest_confidence_threshold:g})"
         )
+        self.get_logger().info(f"Runtime intent labels: {list(self._runtime_class_labels)}")
 
     def _on_eeg_frame(self, frame: EegFrame) -> None:
         try:
