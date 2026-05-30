@@ -4,7 +4,7 @@ Real-time motor-imagery EEG decoding driving a simulated Franka Panda manipulato
 
 ## Quick Start
 
-Requires ROS 2 Jazzy. The devcontainer installs it along with RViz and the ROS dev tools; otherwise [install it for Ubuntu](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html) first.
+Requires ROS 2 Jazzy with RViz — [install it for Ubuntu](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html) first. `scripts/setup-dev-tools` installs the Python lint and type-check tooling (ruff, basedpyright).
 
 ```bash
 scripts/build           # colcon build --symlink-install
@@ -31,13 +31,23 @@ The pure decoder tests can also run without ROS: `PYTHONPATH=src/eeg_bci_pipelin
 `run-bciciv2a-model` swaps the mock decoder for a real CSP + LDA classifier:
 
 ```bash
+# Train CSP+LDA on the A01T session and save the artifact.
 scripts/evaluate-hand-classifier data/raw/bciciv2a/A01T.gdf --save-model tmp/hand-csp-lda-A01T.joblib
-scripts/run-bciciv2a-model gdf_path:=data/raw/bciciv2a/A01T.gdf model_path:=tmp/hand-csp-lda-A01T.joblib
+
+# Replay the held-out A01E session through that model. Replaying the training
+# session (A01T) instead would decode the very epochs the classifier was fit on,
+# measuring memorization rather than generalization.
+scripts/run-bciciv2a-model gdf_path:=data/raw/bciciv2a/A01E.gdf model_path:=tmp/hand-csp-lda-A01T.joblib
+
+# Same decode path, but drives the Panda in RViz instead of only logging intents.
+# Defaults to the A01E recording and the artifact saved above; override with the
+# same gdf_path:= / model_path:= arguments.
+scripts/run-bciciv2a-model-rviz
 ```
 
 The `model_intent_decoder` node takes its frame contract (channels, sampling rate, window length) from the artifact and rejects non-matching frames. It publishes `rest` until one ~3 s window has buffered, then gates any window below `rest_confidence_threshold` (default `0.6`) to `rest`.
 
-Caveats: per-frame decoding with no temporal smoothing; `loop:=true` contaminates ~one window per wrap at the stitched file boundary; and the 22-channel 2a artifact is a benchmark, not the 16-channel BrainAccess rig. Train and replay different sessions (`A01T` then `A01E`) for an honest check, and keep the driver's `confidence_threshold` ≤ `rest_confidence_threshold`.
+Caveats: per-frame decoding with no temporal smoothing; `loop:=true` contaminates ~one window per wrap at the stitched file boundary; and the 22-channel 2a artifact is a benchmark, not the 16-channel BrainAccess rig. The replay drives the arm but never compares the decoded label against A01E's ground truth, so treat it as a qualitative demo — `scripts/evaluate-hand-classifier` reports the (within-session) cross-validated accuracy. Keep the driver's `confidence_threshold` ≤ `rest_confidence_threshold`.
 
 ## Mock robot behavior
 
