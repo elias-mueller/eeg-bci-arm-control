@@ -2,11 +2,13 @@ import numpy as np
 import pytest
 from eeg_bci_pipeline.data.bciciv2a_dataset import LabeledEpochs
 from eeg_bci_pipeline.training.hand_classifier import (
+    HandClassifierArtifact,
     HandClassifierEvaluation,
     evaluate_hand_classifier,
     format_evaluation_report,
     load_hand_classifier_artifact,
     predict_hand_classifier,
+    predict_hand_proba,
     save_hand_classifier_artifact,
     select_hand_epochs,
     train_hand_classifier,
@@ -117,6 +119,61 @@ def test_predict_hand_classifier_rejects_epoch_shape_mismatch():
 
     with pytest.raises(ValueError, match="sample count"):
         predict_hand_classifier(artifact, epochs.epochs_uv[:, :, :-1])
+
+
+def test_predict_hand_proba_normalizes_and_aligns_with_labels():
+    labels = ("left_hand", "right_hand") * 8
+    epochs = make_labeled_epochs(labels)
+    artifact = train_hand_classifier(
+        epochs,
+        csp_components=2,
+        bandpass_low_hz=None,
+        bandpass_high_hz=None,
+    )
+    training_data = select_hand_epochs(epochs)
+
+    proba_labels, probabilities = predict_hand_proba(artifact, training_data.epochs_uv)
+
+    assert probabilities.shape == (len(labels), 2)
+    np.testing.assert_allclose(probabilities.sum(axis=1), 1.0, atol=1e-9)
+    # Columns are ordered to match artifact.class_labels, so the proba argmax label
+    # equals the hard prediction from predict_hand_classifier.
+    predicted = predict_hand_classifier(artifact, training_data.epochs_uv)
+    assert proba_labels == predicted
+    argmax_labels = tuple(
+        artifact.class_labels[int(index)] for index in probabilities.argmax(axis=1)
+    )
+    assert argmax_labels == predicted
+
+
+def test_predict_hand_proba_remaps_columns_by_estimator_class_order():
+    # Estimator whose internal class order is REVERSED relative to class_labels, so an
+    # identity (non-remapping) implementation would transpose the probabilities.
+    class _FakePipeline:
+        classes_ = np.array([1, 0])
+
+        def predict_proba(self, epochs):
+            n = np.asarray(epochs).shape[0]
+            # raw column 0 -> encoded class 1, column 1 -> encoded class 0
+            return np.tile([0.3, 0.7], (n, 1))
+
+    artifact = HandClassifierArtifact(
+        source_id="fake",
+        sampling_rate_hz=100.0,
+        channel_labels=("a", "b", "c", "d"),
+        class_labels=("left_hand", "right_hand"),
+        class_counts=(1, 1),
+        samples_per_epoch=8,
+        pipeline=_FakePipeline(),
+        bandpass_low_hz=None,
+        bandpass_high_hz=None,
+    )
+
+    labels, probabilities = predict_hand_proba(artifact, np.zeros((1, 4, 8)))
+
+    # P(class 1)=right_hand=0.3 must land at index 1, P(class 0)=left_hand=0.7 at index 0.
+    np.testing.assert_allclose(probabilities, [[0.7, 0.3]])
+    assert labels == ("left_hand",)
 
 
 def test_format_evaluation_report_includes_classifier_summary():

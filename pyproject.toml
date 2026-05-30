@@ -9,6 +9,7 @@ include = [
   "src/eeg_bci_pipeline/eeg_bci_pipeline/data/gdf_recording.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/intent_marker_mapping.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/mock_signal.py",
+  "src/eeg_bci_pipeline/eeg_bci_pipeline/model_decode.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/training/hand_classifier.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/training/hand_classifier_cli.py",
   "src/eeg_bci_pipeline/eeg_bci_pipeline/training/eegnet.py",

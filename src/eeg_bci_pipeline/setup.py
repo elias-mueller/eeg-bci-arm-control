@@ -26,6 +26,7 @@ setup(
             "mock_eeg_publisher = eeg_bci_pipeline.mock_eeg_publisher:main",
             "gdf_replay_publisher = eeg_bci_pipeline.gdf_replay_publisher:main",
             "baseline_intent_decoder = eeg_bci_pipeline.baseline_intent_decoder:main",
+            "model_intent_decoder = eeg_bci_pipeline.model_intent_decoder:main",
             "evaluate_hand_classifier = eeg_bci_pipeline.training.hand_classifier_cli:main",
             "intent_marker_publisher = eeg_bci_pipeline.intent_marker_publisher:main",
         ],

@@ -28,6 +28,7 @@ PipelineFactory = Callable[..., object]
 FilterData = Callable[..., FloatArray]
 FitPipeline = Callable[[FloatArray, IntArray], object]
 PredictPipeline = Callable[[FloatArray], IntArray]
+PredictProbaPipeline = Callable[[FloatArray], FloatArray]
 
 
 class JoblibLike(Protocol):
@@ -237,6 +238,51 @@ def predict_hand_classifier(
             raise ValueError(f"classifier predicted unknown class index: {index}")
         labels.append(artifact.class_labels[index])
     return tuple(labels)
+
+
+def predict_hand_proba(
+    artifact: HandClassifierArtifact,
+    epochs_uv: FloatArray,
+) -> tuple[tuple[str, ...], FloatArray]:
+    """Predict labels and per-class probabilities for epoch-shaped EEG windows.
+
+    Returns ``(labels, probabilities)`` where ``probabilities`` has shape
+    ``(n_epochs, n_classes)`` with columns ordered to match
+    ``artifact.class_labels`` (not the estimator's internal class order).
+    Requires a pipeline whose final estimator exposes ``predict_proba``; the
+    CSP + LDA baseline does. Labels are the argmax of the returned probabilities
+    and may differ from ``predict_hand_classifier`` only on an exact
+    (measure-zero) probability tie.
+    """
+
+    epochs = _validate_artifact_epoch_shape(artifact, epochs_uv)
+    prepared_epochs = maybe_bandpass_epochs(
+        epochs,
+        sampling_rate_hz=artifact.sampling_rate_hz,
+        low_hz=artifact.bandpass_low_hz,
+        high_hz=artifact.bandpass_high_hz,
+    )
+    pipeline = artifact.pipeline
+    if not hasattr(pipeline, "predict_proba"):
+        raise RuntimeError(
+            f"artifact pipeline ({artifact.classifier_name}) does not support probability output"
+        )
+
+    predict_proba = cast(PredictProbaPipeline, getattr(pipeline, "predict_proba"))
+    raw_proba = np.asarray(predict_proba(prepared_epochs), dtype=np.float64)
+    class_order = np.asarray(getattr(pipeline, "classes_"), dtype=np.int_)
+
+    n_classes = len(artifact.class_labels)
+    probabilities = np.zeros((raw_proba.shape[0], n_classes), dtype=np.float64)
+    for column, encoded_label in enumerate(class_order):
+        index = int(encoded_label)
+        if index < 0 or index >= n_classes:
+            raise ValueError(f"classifier exposed unknown class index: {index}")
+        probabilities[:, index] = raw_proba[:, column]
+
+    predicted_indices = np.argmax(probabilities, axis=1)
+    labels = tuple(artifact.class_labels[int(index)] for index in predicted_indices)
+    return labels, probabilities
 
 
 def evaluate_hand_classifier(

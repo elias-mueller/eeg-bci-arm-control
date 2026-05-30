@@ -52,6 +52,8 @@ scripts/test
 - `scripts/evaluate-hand-classifier`: evaluate an offline BCIC IV 2a left/right CSP + LDA
   baseline; pass `--save-model path/to/model.joblib` to also fit and save one final CSP+LDA
   calibration artifact
+- `scripts/run-bciciv2a-model`: replay a BCIC IV 2a recording through a saved CSP + LDA model
+  (from `--save-model`) instead of the mock decoder, gating low-confidence windows to `rest`
 - `scripts/lint`: check Python formatting/imports and Ruff lint rules
 - `scripts/format`: format Python files and sort imports with Ruff
 - `scripts/typecheck`: run basedpyright on the pure Python pipeline helpers
@@ -61,6 +63,27 @@ The ROS build, test, and launch scripts source `/opt/ros/${ROS_DISTRO:-jazzy}/se
 ROS launch and test scripts also source `install/setup.bash` and require a prior `scripts/build`.
 Extra arguments are passed through to `colcon`, `ros2 launch`, Ruff, or basedpyright.
 Run `scripts/setup-dev-tools` once to install optional Python developer tools.
+
+## Replaying with a Trained Model
+
+`scripts/run-bciciv2a-model` swaps the mock decoder for a real CSP + LDA classifier on the
+replay path:
+
+```
+scripts/evaluate-hand-classifier data/raw/bciciv2a/A01T.gdf --save-model tmp/hand-csp-lda-A01T.joblib
+scripts/run-bciciv2a-model gdf_path:=data/raw/bciciv2a/A01T.gdf model_path:=tmp/hand-csp-lda-A01T.joblib
+```
+
+The `model_intent_decoder` node takes its frame contract (channels, sampling rate, window
+length) from the artifact and rejects non-matching frames. It publishes `rest` until one epoch
+window (~3 s) has buffered, then gates any window below `rest_confidence_threshold` (default
+`0.6`) to `rest`.
+
+Limitations: per-frame decoding, no temporal smoothing; `loop:=true` contaminates ~one window
+per wrap (stitched file boundary); and the 22-channel BCIC artifact is a benchmark, not for the
+16-channel BrainAccess rig. Train and replay different sessions (`A01T` then `A01E`) for an
+honest check; in a robot launch keep the driver's `confidence_threshold` ≤
+`rest_confidence_threshold`.
 
 ## Mock Robot Behavior
 
