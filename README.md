@@ -1,10 +1,10 @@
 # EEG-BCI Manipulator Control
 
-Real-time motor-imagery EEG decoding driving a simulated Franka Panda manipulator over ROS 2. It runs as a no-device ROS graph: synthetic EEG frames are decoded into mock intents and consumed by a robot-control node.
+Real-time motor-imagery EEG decoding driving a simulated Franka Panda manipulator over ROS 2, a closed loop from EEG frame to joint motion. A CSP + LDA classifier turns EEG windows into movement intents, and an EEGNet (PyTorch) decoder is benchmarked offline against the same baseline. The system is a C++/Python ROS 2 graph: a Python (`rclpy`) EEG and decoding pipeline feeding C++ (`rclcpp`) control nodes through shared `EegFrame`/`Intent` messages.
 
 ## Quick Start
 
-Requires ROS 2 Jazzy with RViz — [install it for Ubuntu](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html) first. `scripts/setup-dev-tools` installs the Python lint and type-check tooling (ruff, basedpyright).
+Requires ROS 2 Jazzy with RViz: [install it for Ubuntu](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html) first. `scripts/setup-dev-tools` installs the Python lint and type-check tooling (ruff, basedpyright).
 
 ```bash
 scripts/build           # colcon build --symlink-install
@@ -16,13 +16,13 @@ scripts/test            # colcon test + verbose results
 
 Three ROS 2 packages under `src/`:
 
-- `eeg_bci_interfaces` — shared `EegFrame` and `Intent` messages
-- `eeg_bci_pipeline` — Python (`rclpy`) mock EEG publisher, baseline decoder, RViz intent marker, and launch files
-- `manipulator_control` — C++ (`rclcpp`) intent logger and intent-driven joint-state driver, plus the Panda visualization URDF
+- `eeg_bci_interfaces`: shared `EegFrame` and `Intent` messages
+- `eeg_bci_pipeline`: Python (`rclpy`) mock EEG publisher, baseline decoder, RViz intent marker, and launch files, plus offline CSP+LDA / EEGNet training under `training/`
+- `manipulator_control`: C++ (`rclcpp`) intent logger and intent-driven joint-state driver, plus the Panda visualization URDF
 
 ## Scripts
 
-`scripts/` wraps the common workflows — building, testing, running each launch, and linting. Each is a short, self-documenting wrapper, so read its header for what it does; launch and test scripts need a prior `scripts/build`.
+`scripts/` wraps the common workflows: building, testing, running each launch, and linting. Each is a short, self-documenting wrapper, so read its header for what it does; launch and test scripts need a prior `scripts/build`.
 
 The pure decoder tests can also run without ROS: `PYTHONPATH=src/eeg_bci_pipeline pytest src/eeg_bci_pipeline/test`.
 
@@ -34,7 +34,7 @@ The pure decoder tests can also run without ROS: `PYTHONPATH=src/eeg_bci_pipelin
 # Train CSP+LDA on the A01T session and save the artifact.
 scripts/evaluate-hand-classifier data/raw/bciciv2a/A01T.gdf --save-model tmp/hand-csp-lda-A01T.joblib
 
-# Replay the held-out A01E session — not A01T, which the model was trained on.
+# Replay the held-out A01E session, not the A01T session the model was trained on.
 scripts/run-bciciv2a-model gdf_path:=data/raw/bciciv2a/A01E.gdf model_path:=tmp/hand-csp-lda-A01T.joblib
 
 # Same decode path, but drives the Panda in RViz. Defaults to the A01E recording
@@ -48,4 +48,4 @@ The replay drives the arm but does not score predictions against ground truth; f
 
 ## Mock robot behavior
 
-The mock robot launch maps decoded intents to `panda_joint2` — `rest` holds, `left_hand` moves negative, `right_hand` moves positive — while the other joints publish zero so `robot_state_publisher` keeps the full TF tree. `intent_joint_state_driver` ignores intents below `confidence_threshold` (default `0.55`), holds after `intent_timeout_sec` (default `0.3`) without messages, and drives `driven_joint_name` (default `panda_joint2`).
+The mock robot launch maps decoded intents to `panda_joint2` (`rest` holds, `left_hand` moves negative, `right_hand` moves positive) while the other joints publish zero so `robot_state_publisher` keeps the full TF tree. `intent_joint_state_driver` ignores intents below `confidence_threshold` (default `0.55`), holds after `intent_timeout_sec` (default `0.3`) without messages, and drives `driven_joint_name` (default `panda_joint2`).
