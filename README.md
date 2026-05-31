@@ -34,20 +34,17 @@ The pure decoder tests can also run without ROS: `PYTHONPATH=src/eeg_bci_pipelin
 # Train CSP+LDA on the A01T session and save the artifact.
 scripts/evaluate-hand-classifier data/raw/bciciv2a/A01T.gdf --save-model tmp/hand-csp-lda-A01T.joblib
 
-# Replay the held-out A01E session through that model. Replaying the training
-# session (A01T) instead would decode the very epochs the classifier was fit on,
-# measuring memorization rather than generalization.
+# Replay the held-out A01E session — not A01T, which the model was trained on.
 scripts/run-bciciv2a-model gdf_path:=data/raw/bciciv2a/A01E.gdf model_path:=tmp/hand-csp-lda-A01T.joblib
 
-# Same decode path, but drives the Panda in RViz instead of only logging intents.
-# Defaults to the A01E recording and the artifact saved above; override with the
-# same gdf_path:= / model_path:= arguments.
+# Same decode path, but drives the Panda in RViz. Defaults to the A01E recording
+# and the artifact above; override with gdf_path:= / model_path:=.
 scripts/run-bciciv2a-model-rviz
 ```
 
 The `model_intent_decoder` node takes its frame contract (channels, sampling rate, window length) from the artifact and rejects non-matching frames. It publishes `rest` until one ~3 s window has buffered, then gates any window below `rest_confidence_threshold` (default `0.6`) to `rest`.
 
-Caveats: per-frame decoding with no temporal smoothing; `loop:=true` contaminates ~one window per wrap at the stitched file boundary; and the 22-channel 2a artifact is a benchmark, not the 16-channel BrainAccess rig. The replay drives the arm but never compares the decoded label against A01E's ground truth, so treat it as a qualitative demo — `scripts/evaluate-hand-classifier` reports the (within-session) cross-validated accuracy. Keep the driver's `confidence_threshold` ≤ `rest_confidence_threshold`.
+The replay drives the arm but does not score predictions against ground truth; for cross-validated accuracy, run `scripts/evaluate-hand-classifier`.
 
 ## Mock robot behavior
 
