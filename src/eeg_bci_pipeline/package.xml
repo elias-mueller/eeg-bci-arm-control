@@ -3,7 +3,7 @@
 <package format="3">
   <name>eeg_bci_pipeline</name>
   <version>0.1.0</version>
-  <description>Mock EEG publishing and baseline intent decoding nodes.</description>
+  <description>EEG publishing, mock and model-backed intent decoding, GDF replay, and offline classifier training.</description>
   <maintainer email="elias.mueller@pm.me">Elias Mueller</maintainer>
   <license>Apache-2.0</license>
 

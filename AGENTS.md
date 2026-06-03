@@ -18,9 +18,9 @@
 
 EEG-BCI Manipulator Control: real-time motor-imagery EEG pipeline driving a simulated Franka Panda manipulator over ROS 2.
 
-- **EEG pipeline.** Python (`rclpy`), MNE, scikit-learn. 16-channel BrainAccess MIDI recordings at 250 Hz. CSP + LDA baseline; EEGNet (PyTorch) experiments.
+- **EEG pipeline.** Python (`rclpy`), MNE, scikit-learn. Target rig: 16-channel BrainAccess MIDI at 250 Hz; currently developed and benchmarked on BCIC IV 2a (22-channel). CSP + LDA baseline; EEGNet (PyTorch) experiments.
 - **Robot control.** C++ (`rclcpp`) ROS 2 nodes.
-- **Simulation.** Gazebo with a Franka Panda model.
+- **Simulation.** RViz visualization of a Franka Panda model (Gazebo is a future direction).
 
 ## Tool-Specific Instructions
 

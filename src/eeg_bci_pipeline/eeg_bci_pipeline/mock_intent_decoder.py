@@ -24,11 +24,11 @@ SMALL_PEAK_WARNING_INTERVAL_FRAMES = 100
 CONTRACT_WARNING_INTERVAL_FRAMES = 100
 
 
-class BaselineIntentDecoder(Node):
+class MockIntentDecoder(Node):
     """Subscribes to EEG frames and publishes deterministic mock intents."""
 
     def __init__(self) -> None:
-        super().__init__("baseline_intent_decoder")
+        super().__init__("mock_intent_decoder")
         self.declare_parameter("input_topic", "/bci/eeg")
         self.declare_parameter("output_topic", "/bci/intent")
         self.declare_parameter("class_labels", list(DEFAULT_CLASS_LABELS))
@@ -154,7 +154,7 @@ class BaselineIntentDecoder(Node):
 
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
-    node = BaselineIntentDecoder()
+    node = MockIntentDecoder()
     try:
         rclpy.spin(node)
     finally:

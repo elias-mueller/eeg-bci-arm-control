@@ -1,4 +1,4 @@
-"""Deterministic baseline decoder used before hardware and model training exist."""
+"""Deterministic mock decoder used before hardware and model training exist."""
 
 from __future__ import annotations
 

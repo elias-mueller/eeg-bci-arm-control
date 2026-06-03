@@ -21,7 +21,7 @@ and falls back to the synthetic mock decoder only when the dataset is absent.
 Three ROS 2 packages under `src/`:
 
 - `eeg_bci_interfaces`: shared `EegFrame` and `Intent` messages
-- `eeg_bci_pipeline`: Python (`rclpy`) mock EEG publisher, baseline decoder, RViz intent marker, and launch files, plus offline CSP+LDA / EEGNet training under `training/`
+- `eeg_bci_pipeline`: Python (`rclpy`) mock EEG publisher, GDF replay, mock and model-backed intent decoders, RViz intent marker, and launch files, plus offline CSP+LDA / EEGNet training under `training/`
 - `manipulator_control`: C++ (`rclcpp`) intent logger and intent-driven joint-state driver, plus the Panda visualization URDF
 
 ## Scripts

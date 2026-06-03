@@ -19,8 +19,8 @@ def generate_launch_description() -> LaunchDescription:
             ),
             Node(
                 package="eeg_bci_pipeline",
-                executable="baseline_intent_decoder",
-                name="baseline_intent_decoder",
+                executable="mock_intent_decoder",
+                name="mock_intent_decoder",
                 parameters=[
                     {
                         "class_labels": ["rest", "left_hand", "right_hand"],
