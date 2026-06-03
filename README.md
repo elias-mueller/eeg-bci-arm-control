@@ -8,9 +8,13 @@ Requires ROS 2 Jazzy with RViz: [install it for Ubuntu](https://docs.ros.org/en/
 
 ```bash
 scripts/build           # colcon build --symlink-install
-scripts/run-robot-rviz  # mock pipeline + Panda model in RViz
+scripts/run-robot-rviz  # Panda in RViz: real CSP+LDA decode of BCIC replay if present, else mock
 scripts/test            # colcon test + verbose results
 ```
+
+`run-robot-rviz` prefers real decoding: when the BCIC IV 2a dataset is present it
+trains the CSP+LDA artifact if needed and drives the Panda from held-out replay,
+and falls back to the synthetic mock decoder only when the dataset is absent.
 
 ## Layout
 
@@ -28,7 +32,8 @@ The pure decoder tests can also run without ROS: `PYTHONPATH=src/eeg_bci_pipelin
 
 ## Replaying with a trained model
 
-`run-bciciv2a-model` swaps the mock decoder for a real CSP + LDA classifier:
+`run-bciciv2a-model` swaps the mock decoder for a real CSP + LDA classifier (this
+is the path `run-robot-rviz` auto-selects when the dataset is present):
 
 ```bash
 # Train CSP+LDA on the A01T session and save the artifact.

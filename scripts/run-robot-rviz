@@ -15,6 +15,29 @@ if [ ! -f "$workspace_setup" ]; then
   exit 1
 fi
 
+cd "$repo_root"
+
+# Prefer real CSP+LDA decoding of held-out BCIC IV 2a replay (train on A01T, replay
+# A01E). The dataset is gitignored, so fall back to the synthetic mock decoder when
+# it is absent and a fresh clone can still run the visualization. Power users can
+# target other recordings/models with scripts/run-bciciv2a-model-rviz directly.
+train_gdf="data/raw/bciciv2a/A01T.gdf"
+replay_gdf="data/raw/bciciv2a/A01E.gdf"
+model_path="tmp/hand-csp-lda-A01T.joblib"
+
+launch="mock_robot_rviz.launch.py"
+if [ -f "$train_gdf" ] && [ -f "$replay_gdf" ]; then
+  if [ ! -f "$model_path" ]; then
+    echo "No trained artifact at $model_path; training CSP+LDA on $train_gdf." >&2
+    scripts/evaluate-hand-classifier "$train_gdf" --save-model "$model_path"
+  fi
+  echo "Driving the Panda from real CSP+LDA decoding of held-out $replay_gdf." >&2
+  launch="bciciv2a_model_robot_rviz.launch.py"
+else
+  echo "BCIC IV 2a data not found under data/raw/bciciv2a/; using the synthetic mock decoder." >&2
+  echo "Add the dataset (or run scripts/run-bciciv2a-model-rviz) for real decoding." >&2
+fi
+
 set +u
 # shellcheck source=/dev/null
 source "$ros_setup"
@@ -22,5 +45,4 @@ source "$ros_setup"
 source "$workspace_setup"
 set -u
 
-cd "$repo_root"
-exec ros2 launch eeg_bci_pipeline mock_robot_rviz.launch.py "$@"
+exec ros2 launch eeg_bci_pipeline "$launch" "$@"
