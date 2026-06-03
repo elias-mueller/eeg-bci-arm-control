@@ -1,20 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-ros_distro="${ROS_DISTRO:-jazzy}"
-ros_setup="/opt/ros/${ros_distro}/setup.bash"
-workspace_setup="$repo_root/install/setup.bash"
-
-if [ ! -f "$ros_setup" ]; then
-  echo "ROS setup not found at $ros_setup" >&2
-  exit 1
-fi
-if [ ! -f "$workspace_setup" ]; then
-  echo "Workspace is not built. Run: scripts/build" >&2
-  exit 1
-fi
-
+require_ros_and_workspace
 cd "$repo_root"
 
 # Prefer real CSP+LDA decoding of held-out BCIC IV 2a replay (train on A01T, replay
@@ -38,11 +27,5 @@ else
   echo "Add the dataset (or run scripts/run-bciciv2a-model-rviz) for real decoding." >&2
 fi
 
-set +u
-# shellcheck source=/dev/null
-source "$ros_setup"
-# shellcheck source=/dev/null
-source "$workspace_setup"
-set -u
-
+source_ros_workspace
 exec ros2 launch eeg_bci_pipeline "$launch" "$@"

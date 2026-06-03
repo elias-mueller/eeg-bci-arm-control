@@ -1,19 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-ros_distro="${ROS_DISTRO:-jazzy}"
-ros_setup="/opt/ros/${ros_distro}/setup.bash"
-
-if [ ! -f "$ros_setup" ]; then
-  echo "ROS setup not found at $ros_setup" >&2
-  exit 1
-fi
-
-set +u
-# shellcheck source=/dev/null
-source "$ros_setup"
-set -u
-
+require_ros
+source_ros
 cd "$repo_root"
 exec colcon build --symlink-install "$@"

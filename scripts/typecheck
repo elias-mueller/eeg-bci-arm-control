@@ -1,28 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-ros_distro="${ROS_DISTRO:-jazzy}"
-ros_setup="/opt/ros/${ros_distro}/setup.bash"
-workspace_setup="$repo_root/install/setup.bash"
-
-set +u
-if [ -f "$ros_setup" ]; then
-  # shellcheck source=/dev/null
-  source "$ros_setup"
-fi
-if [ -f "$workspace_setup" ]; then
-  # shellcheck source=/dev/null
-  source "$workspace_setup"
-fi
-set -u
-
+source_ros_workspace_optional
 cd "$repo_root"
-
-pipx_bin="${PIPX_BIN_DIR:-$HOME/.local/bin}"
-if [ -d "$pipx_bin" ]; then
-  PATH="$pipx_bin:$PATH"
-fi
+prepend_pipx_bin
 
 if command -v basedpyright >/dev/null 2>&1; then
   exec basedpyright "$@"
