@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=scripts/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+# Create an encapsulated .venv for pip-only runtime deps (e.g. pylsl) without
+# touching the apt-managed system Python. --system-site-packages keeps rclpy and
+# the generated message packages visible, so ROS nodes still import. The repo
+# scripts (lib.sh) and .envrc add this .venv to PYTHONPATH so ros2 launch / ros2
+# run resolve the deps. Native libraries (liblsl) are installed via dpkg, below.
+cd "$repo_root"
+
+venv_dir="${repo_root}/.venv"
+python_bin="${PYTHON:-python3}"
+
+if [ ! -d "$venv_dir" ]; then
+  echo "Creating ${venv_dir} (--system-site-packages: rclpy + ROS messages stay visible)"
+  "$python_bin" -m venv --system-site-packages "$venv_dir"
+fi
+
+echo "Installing requirements.txt into ${venv_dir}"
+"$venv_dir/bin/python" -m pip install --upgrade pip >/dev/null
+"$venv_dir/bin/python" -m pip install -r requirements.txt
+
+# pylsl loads the native liblsl at import, so this checks both the wrapper and the
+# C library in one shot. liblsl has no apt/rosdep package; install the SCCN .deb.
+if "$venv_dir/bin/python" - <<'PY'
+import sys
+try:
+    import pylsl
+    pylsl.library_version()
+except Exception as error:  # ImportError, or liblsl-not-found RuntimeError
+    sys.stderr.write(f"pylsl import / liblsl load failed: {error}\n")
+    sys.exit(1)
+print(f"pylsl {pylsl.__version__} / liblsl {pylsl.library_version()}")
+PY
+then
+  echo "Python env ready. Run scripts/run-lsl for the live LSL demo."
+else
+  codename="$( . /etc/os-release 2>/dev/null || true; echo "${VERSION_CODENAME:-noble}" )"
+  arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+  deb="liblsl-1.17.7-${codename}_${arch}.deb"
+  cat >&2 <<EOF
+
+liblsl (native library) was not found, and pylsl needs it at import time. It has
+no apt/rosdep package on Ubuntu; install the SCCN release .deb (dpkg-managed) for
+your codename/arch:
+
+  wget https://github.com/sccn/liblsl/releases/download/v1.17.7/${deb}
+  sudo apt install ./${deb}
+
+Then re-run scripts/setup-python-env to verify.
+EOF
+  exit 1
+fi

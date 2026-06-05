@@ -2,9 +2,18 @@
 
 Real-time motor-imagery EEG decoding driving a simulated Franka Panda manipulator over ROS 2, a closed loop from EEG frame to joint motion. A CSP + LDA classifier turns EEG windows into movement intents, and an EEGNet (PyTorch) decoder is benchmarked offline against the same baseline. The system is a C++/Python ROS 2 graph: a Python (`rclpy`) EEG and decoding pipeline feeding C++ (`rclcpp`) control nodes through shared `EegFrame`/`Intent` messages.
 
-## Quick Start
+## Setup
 
-Requires ROS 2 Jazzy with RViz: [install it for Ubuntu](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html) first. `scripts/setup-dev-tools` installs the Python lint and type-check tooling (ruff, basedpyright).
+One-time setup, in order; each item is only needed for the parts you use.
+
+- **ROS 2 Jazzy + RViz** (required for building and any launch). [Install for Ubuntu](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html).
+- **Dev tooling** (optional, for `scripts/lint` and `scripts/typecheck`): `scripts/setup-dev-tools` installs `ruff` and `basedpyright` via `pipx`.
+- **Live LSL** (optional, for `scripts/run-lsl`): `scripts/setup-python-env` creates a repo `.venv` and installs `pylsl`. Its wheel bundles the native `liblsl`, so on x86_64 nothing else is needed; the script self-checks and only prints a one-time `liblsl` `.deb` fallback if the bundled library fails to load. The repo scripts and `.envrc` put the `.venv` on `PYTHONPATH`, so the system Python stays untouched.
+- **BCIC IV 2a dataset** (optional, for real decode and the replay demos): put the `.gdf` files under `data/raw/bciciv2a/` (gitignored). Without it, `run-robot-rviz` uses the synthetic mock.
+
+The pipeline's other Python dependencies (mne, numpy, scikit-learn) come from apt via `package.xml`; only LSL uses the `.venv`.
+
+## Quick Start
 
 ```bash
 scripts/build           # colcon build --symlink-install
@@ -50,6 +59,40 @@ scripts/run-bciciv2a-model-rviz
 The `model_intent_decoder` node takes its frame contract (channels, sampling rate, window length) from the artifact and rejects non-matching frames. It publishes `rest` until one ~3 s window has buffered, then gates any window below `rest_confidence_threshold` (default `0.6`) to `rest`.
 
 The replay drives the arm but does not score predictions against ground truth; for cross-validated accuracy, run `scripts/evaluate-hand-classifier`.
+
+## Live LSL (Lab Streaming Layer)
+
+`run-lsl` drives the Panda from a live LSL EEG stream instead of in-process GDF
+replay. The bridge (`lsl_eeg_bridge`) is vendor-agnostic: it resolves any
+`type="EEG"` LSL stream (a BrainAccess MIDI, a replay outlet, or a synthetic test
+stream) and republishes it as `EegFrame` on `/bci/eeg`, so the rest of the graph
+is unchanged. Set up `pylsl` once with `scripts/setup-python-env` (see [Setup](#setup)).
+
+Hardware-free demo (default): a test outlet replays the held-out A01E session over
+LSL through the same 22-channel CSP+LDA model, so the arm moves from real decoded
+EEG with no headset:
+
+```bash
+scripts/run-lsl
+```
+
+`mode:=synthetic` streams the deterministic mock waveform instead; that is a
+bridge transport smoke test only (its `ch_NN` labels do not match the model, so it
+does not move the arm). Inspect the bridged stream with `ros2 topic echo /bci/eeg`.
+
+A live BrainAccess MIDI is the same launch with the test outlet off and a
+same-montage model (a 16-channel artifact from a calibration session, not the
+22-channel BCIC one):
+
+```bash
+scripts/run-lsl start_test_outlet:=false stream_name:=<headset stream> \
+    expected_channel_count:=16 model_path:=tmp/hand-16ch.joblib
+```
+
+The bridge auto-detects the stream's declared unit (microvolts or volts) and
+scales to microvolts accordingly. `scale_to_microvolts` is only the fallback for a
+stream that declares no recognized unit; set it then (e.g.
+`scale_to_microvolts:=1000000.0` for an unlabeled volts stream).
 
 ## Mock robot behavior
 

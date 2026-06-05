@@ -1,0 +1,5 @@
+# Runtime pip-only Python dependencies, installed into the repo .venv by
+# scripts/setup-python-env (see README "Live LSL (Lab Streaming Layer)"). The
+# native liblsl library is installed separately via dpkg, not pip. Keep
+# apt-provided runtime deps (mne / numpy / sklearn) in package.xml, not here.
+pylsl>=1.16,<2

@@ -56,12 +56,30 @@ source_ros_workspace_optional() {
     source "$workspace_setup"
   fi
   set -u
+  prepend_venv_site_packages
+}
+
+# Add the repo .venv (pip-only deps like pylsl) to PYTHONPATH so ros2 launch /
+# ros2 run, which start nodes via system-Python console scripts, can import them.
+# The .venv (built --system-site-packages by scripts/setup-python-env) holds only
+# pip-only deps with no meaningful apt overlap. It does sit ahead of the system
+# site-packages on PYTHONPATH, so keep it to such deps.
+prepend_venv_site_packages() {
+  local site_packages
+  for site_packages in "${repo_root}/.venv"/lib/python*/site-packages; do
+    if [ -d "$site_packages" ]; then
+      PYTHONPATH="${site_packages}${PYTHONPATH:+:${PYTHONPATH}}"
+      export PYTHONPATH
+      return
+    fi
+  done
 }
 
 # Verify prerequisites, source the environment, and cd to the repo root.
 enter_ros_workspace() {
   require_ros_and_workspace
   source_ros_workspace
+  prepend_venv_site_packages
   cd "$repo_root" || exit 1
 }
 

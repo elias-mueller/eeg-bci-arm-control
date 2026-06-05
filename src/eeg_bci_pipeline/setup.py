@@ -25,6 +25,8 @@ setup(
         "console_scripts": [
             "mock_eeg_publisher = eeg_bci_pipeline.mock_eeg_publisher:main",
             "gdf_replay_publisher = eeg_bci_pipeline.gdf_replay_publisher:main",
+            "lsl_eeg_bridge = eeg_bci_pipeline.lsl_eeg_bridge:main",
+            "lsl_test_outlet = eeg_bci_pipeline.lsl_test_outlet:main",
             "mock_intent_decoder = eeg_bci_pipeline.mock_intent_decoder:main",
             "model_intent_decoder = eeg_bci_pipeline.model_intent_decoder:main",
             "evaluate_hand_classifier = eeg_bci_pipeline.training.hand_classifier_cli:main",
