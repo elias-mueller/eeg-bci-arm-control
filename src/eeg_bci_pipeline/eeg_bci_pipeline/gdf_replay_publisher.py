@@ -1,9 +1,12 @@
+# pyright: basic
+# rclpy and the generated message classes are only partially typed; strict mode
+# floods this shell with reportUnknown* noise. Basic still catches real mistakes.
 """Replay GDF EEG recordings as EegFrame messages."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, cast
 
 import rclpy
 from rcl_interfaces.msg import ParameterDescriptor
@@ -27,6 +30,7 @@ from eeg_bci_pipeline.eeg_frame_contract import (
     DEFAULT_SAMPLING_RATE_TOLERANCE_HZ,
     validate_eeg_frame_payload,
 )
+from eeg_bci_pipeline.node_params import bool_param, float_param, int_param, str_param
 
 
 class GdfReplayPublisher(Node):
@@ -44,21 +48,17 @@ class GdfReplayPublisher(Node):
         self.declare_parameter("sampling_rate_tolerance_hz", DEFAULT_SAMPLING_RATE_TOLERANCE_HZ)
         self.declare_parameter("max_abs_sample_uv", DEFAULT_MAX_ABS_SAMPLE_UV)
 
-        gdf_path_value = str(self.get_parameter("gdf_path").value)
+        gdf_path_value = str_param(self, "gdf_path")
         if not gdf_path_value:
             raise ValueError("gdf_path parameter must point to a GDF recording")
         gdf_path = Path(gdf_path_value).expanduser()
 
-        self._samples_per_frame = int(self.get_parameter("samples_per_frame").value)
-        self._loop = bool(self.get_parameter("loop").value)
-        self._expected_channel_count = int(self.get_parameter("expected_channel_count").value)
-        self._expected_sampling_rate_hz = float(
-            self.get_parameter("expected_sampling_rate_hz").value
-        )
-        self._sampling_rate_tolerance_hz = float(
-            self.get_parameter("sampling_rate_tolerance_hz").value
-        )
-        self._max_abs_sample_uv = float(self.get_parameter("max_abs_sample_uv").value)
+        self._samples_per_frame = int_param(self, "samples_per_frame")
+        self._loop = bool_param(self, "loop")
+        self._expected_channel_count = int_param(self, "expected_channel_count")
+        self._expected_sampling_rate_hz = float_param(self, "expected_sampling_rate_hz")
+        self._sampling_rate_tolerance_hz = float_param(self, "sampling_rate_tolerance_hz")
+        self._max_abs_sample_uv = float_param(self, "max_abs_sample_uv")
         channel_labels = self._optional_string_array("channel_labels")
 
         self._recording = read_gdf_recording(gdf_path, channel_labels=channel_labels)
@@ -72,7 +72,7 @@ class GdfReplayPublisher(Node):
             raise ValueError("GDF recording contains no replay frames")
 
         self._validate_first_frame(self._recording)
-        topic = self.get_parameter("topic").value
+        topic = str_param(self, "topic")
         self._publisher = self.create_publisher(EegFrame, topic, qos_profile_sensor_data)
         self._frame_index = 0
         self._loop_index = 0
@@ -126,11 +126,12 @@ class GdfReplayPublisher(Node):
         )
 
     def _optional_string_array(self, parameter_name: str) -> tuple[str, ...] | None:
-        labels = normalize_channel_labels(self.get_parameter(parameter_name).value)
+        value = cast(Sequence[str], self.get_parameter(parameter_name).value)
+        labels = normalize_channel_labels(value)
         return labels or None
 
 
-def main(args: Sequence[str] | None = None) -> None:
+def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
     node = None
     try:

@@ -1,3 +1,6 @@
+# pyright: basic
+# rclpy and the generated message classes are only partially typed; strict mode
+# floods this shell with reportUnknown* noise. Basic still catches real mistakes.
 """Decode EEG frames into intents with a trained hand-classifier model.
 
 Thin ROS shell over the pure `model_decode` helpers: it loads a saved
@@ -10,6 +13,7 @@ publishes `rest` so the robot holds position.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence, cast
 
 import rclpy
 from rclpy.node import Node
@@ -30,6 +34,7 @@ from eeg_bci_pipeline.model_decode import (
     rest_intent,
     runtime_labels_for_artifact,
 )
+from eeg_bci_pipeline.node_params import float_param, str_param
 from eeg_bci_pipeline.training.hand_classifier import load_hand_classifier_artifact
 
 CONTRACT_WARNING_INTERVAL_FRAMES = 100
@@ -47,21 +52,17 @@ class ModelIntentDecoder(Node):
         self.declare_parameter("sampling_rate_tolerance_hz", DEFAULT_SAMPLING_RATE_TOLERANCE_HZ)
         self.declare_parameter("max_abs_sample_uv", DEFAULT_MAX_ABS_SAMPLE_UV)
 
-        input_topic = self.get_parameter("input_topic").value
-        output_topic = self.get_parameter("output_topic").value
-        model_path = str(self.get_parameter("model_path").value)
+        input_topic = str_param(self, "input_topic")
+        output_topic = str_param(self, "output_topic")
+        model_path = str_param(self, "model_path")
         if not model_path:
             raise ValueError("model_path parameter must point to a saved classifier artifact")
         model_path = str(Path(model_path).expanduser())
-        self._rest_confidence_threshold = float(
-            self.get_parameter("rest_confidence_threshold").value
-        )
+        self._rest_confidence_threshold = float_param(self, "rest_confidence_threshold")
         if not 0.0 <= self._rest_confidence_threshold <= 1.0:
             raise ValueError("rest_confidence_threshold must be between 0 and 1")
-        self._sampling_rate_tolerance_hz = float(
-            self.get_parameter("sampling_rate_tolerance_hz").value
-        )
-        self._max_abs_sample_uv = float(self.get_parameter("max_abs_sample_uv").value)
+        self._sampling_rate_tolerance_hz = float_param(self, "sampling_rate_tolerance_hz")
+        self._max_abs_sample_uv = float_param(self, "max_abs_sample_uv")
 
         # Loading fails loudly (missing/corrupt/unsupported artifact) — this node is
         # only launched when real model decoding is intended.
@@ -100,11 +101,14 @@ class ModelIntentDecoder(Node):
         self.get_logger().info(f"Runtime intent labels: {list(self._runtime_class_labels)}")
 
     def _on_eeg_frame(self, frame: EegFrame) -> None:
+        # Cast the loosely typed rclpy message fields once at the boundary.
+        channel_labels = cast(Sequence[str], frame.channel_labels)
+        samples = cast(Sequence[float], frame.samples)
         try:
             validate_eeg_frame_payload(
                 sampling_rate_hz=frame.sampling_rate_hz,
-                channel_labels=frame.channel_labels,
-                samples=frame.samples,
+                channel_labels=channel_labels,
+                samples=samples,
                 expected_channel_labels=self._artifact.channel_labels,
                 expected_sampling_rate_hz=self._artifact.sampling_rate_hz,
                 sampling_rate_tolerance_hz=self._sampling_rate_tolerance_hz,
@@ -122,7 +126,7 @@ class ModelIntentDecoder(Node):
             self._contract_error_count = 0
             self._last_contract_error = ""
 
-        window = self._buffer.push(frame.samples)
+        window = self._buffer.push(samples)
         if window is None:
             self._publish(frame, rest_intent(self._runtime_class_labels))
             return

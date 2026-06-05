@@ -1,8 +1,10 @@
 [tool.basedpyright]
-# Strict typing covers the whole pipeline package by default, so new pure helpers
-# are checked without being added to an allowlist. The ROS node shells are excluded
-# because rclpy parameters and generated message fields currently surface many
-# Unknown types under strict mode; the pure logic they call is still checked.
+# The whole pipeline package is type-checked. Pure modules run under strict mode
+# (the default below); the rclpy node shells carry a per-file "# pyright: basic"
+# header because rclpy and the generated message classes are only partially typed,
+# so strict floods them with reportUnknown* noise. Basic still catches real
+# mistakes (undefined names, bad calls, argument-type errors), and the editor LSP
+# honors the same header, so new pure helpers stay strict by default.
 include = [
   "src/eeg_bci_pipeline/eeg_bci_pipeline",
 ]
@@ -12,11 +14,6 @@ exclude = [
   "build",
   "install",
   "log",
-  "src/eeg_bci_pipeline/eeg_bci_pipeline/mock_eeg_publisher.py",
-  "src/eeg_bci_pipeline/eeg_bci_pipeline/gdf_replay_publisher.py",
-  "src/eeg_bci_pipeline/eeg_bci_pipeline/mock_intent_decoder.py",
-  "src/eeg_bci_pipeline/eeg_bci_pipeline/model_intent_decoder.py",
-  "src/eeg_bci_pipeline/eeg_bci_pipeline/intent_marker_publisher.py",
 ]
 extraPaths = ["src/eeg_bci_pipeline"]
 pythonVersion = "3.12"

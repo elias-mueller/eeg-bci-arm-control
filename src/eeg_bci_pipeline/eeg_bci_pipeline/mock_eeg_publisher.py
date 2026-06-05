@@ -1,3 +1,6 @@
+# pyright: basic
+# rclpy and the generated message classes are only partially typed; strict mode
+# floods this shell with reportUnknown* noise. Basic still catches real mistakes.
 """Publish synthetic EEG frames so the pipeline can run without hardware."""
 
 from __future__ import annotations
@@ -17,6 +20,12 @@ from eeg_bci_pipeline.mock_signal import (
     generate_mock_eeg_samples,
     select_cycle_value,
 )
+from eeg_bci_pipeline.node_params import (
+    float_list_param,
+    float_param,
+    int_param,
+    str_param,
+)
 
 
 class MockEegPublisher(Node):
@@ -33,16 +42,14 @@ class MockEegPublisher(Node):
         self.declare_parameter("frames_per_intent", 10)
         self.declare_parameter("topic", "/bci/eeg")
 
-        self._source_id = self.get_parameter("source_id").value
-        self._sampling_rate_hz = float(self.get_parameter("sampling_rate_hz").value)
-        self._channel_count = int(self.get_parameter("channel_count").value)
-        self._samples_per_frame = int(self.get_parameter("samples_per_frame").value)
-        self._amplitude_cycle_uv = tuple(
-            float(value) for value in self.get_parameter("amplitude_cycle_uv").value
-        )
-        self._frames_per_intent = int(self.get_parameter("frames_per_intent").value)
-        publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
-        topic = self.get_parameter("topic").value
+        self._source_id = str_param(self, "source_id")
+        self._sampling_rate_hz = float_param(self, "sampling_rate_hz")
+        self._channel_count = int_param(self, "channel_count")
+        self._samples_per_frame = int_param(self, "samples_per_frame")
+        self._amplitude_cycle_uv = tuple(float_list_param(self, "amplitude_cycle_uv"))
+        self._frames_per_intent = int_param(self, "frames_per_intent")
+        publish_rate_hz = float_param(self, "publish_rate_hz")
+        topic = str_param(self, "topic")
 
         self._channel_labels = list(default_channel_labels(self._channel_count))
         self._sample_index = 0

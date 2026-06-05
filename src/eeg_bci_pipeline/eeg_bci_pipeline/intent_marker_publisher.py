@@ -1,3 +1,6 @@
+# pyright: basic
+# rclpy and the generated message classes are only partially typed; strict mode
+# floods this shell with reportUnknown* noise. Basic still catches real mistakes.
 """Publish RViz markers for decoded BCI intents."""
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from visualization_msgs.msg import Marker
 
 from eeg_bci_interfaces.msg import Intent
 from eeg_bci_pipeline.intent_marker_mapping import IntentMarkerStyle, style_for_intent
+from eeg_bci_pipeline.node_params import str_param
 
 
 class IntentMarkerPublisher(Node):
@@ -21,9 +25,9 @@ class IntentMarkerPublisher(Node):
         self.declare_parameter("marker_topic", "/bci/intent_marker")
         self.declare_parameter("frame_id", "bci_world")
 
-        input_topic = self.get_parameter("input_topic").value
-        marker_topic = self.get_parameter("marker_topic").value
-        self._frame_id = self.get_parameter("frame_id").value
+        input_topic = str_param(self, "input_topic")
+        marker_topic = str_param(self, "marker_topic")
+        self._frame_id = str_param(self, "frame_id")
 
         self._publisher = self.create_publisher(Marker, marker_topic, 10)
         self._subscription = self.create_subscription(
