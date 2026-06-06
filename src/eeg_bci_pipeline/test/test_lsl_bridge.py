@@ -1,6 +1,9 @@
 import pytest
 from eeg_bci_pipeline.data.gdf_recording import VOLTS_TO_MICROVOLTS
 from eeg_bci_pipeline.lsl_bridge import (
+    NANOSECONDS_PER_SECOND,
+    LslClockAligner,
+    build_resolve_predicate,
     channel_major_to_sample_major,
     chunk_to_channel_major_uv,
     extract_lsl_metadata,
@@ -289,3 +292,139 @@ def test_real_pylsl_streaminfo_desc_round_trips_through_extract():
     assert meta.nominal_srate_hz == pytest.approx(250.0)
     assert meta.declared_unit == "microvolts"
     assert meta.source_id == "rt-src"
+
+
+# --- build_resolve_predicate -------------------------------------------------
+
+
+def test_build_resolve_predicate_conjoins_name_and_type():
+    assert build_resolve_predicate("rt-test", "EEG") == "name='rt-test' and type='EEG'"
+
+
+def test_build_resolve_predicate_single_clause():
+    assert build_resolve_predicate("", "EEG") == "type='EEG'"
+    assert build_resolve_predicate("headset-7", "") == "name='headset-7'"
+
+
+def test_build_resolve_predicate_requires_a_clause():
+    with pytest.raises(ValueError, match="stream_name and/or stream_type"):
+        build_resolve_predicate("", "")
+
+
+def test_build_resolve_predicate_rejects_single_quote():
+    # A quote would break out of the predicate's quoted literal; reject, not escape.
+    with pytest.raises(ValueError, match="single quote"):
+        build_resolve_predicate("rogue' or '1'='1", "EEG")
+    with pytest.raises(ValueError, match="single quote"):
+        build_resolve_predicate("", "EE'G")
+
+
+# --- LslClockAligner ---------------------------------------------------------
+
+
+def test_clock_aligner_anchors_to_ros_time_on_first_sample():
+    aligner = LslClockAligner(resync_threshold_sec=0.25)
+    # The first sample defines the anchor, so its stamp is the ROS arrival time
+    # regardless of the LSL clock's absolute value.
+    assert aligner.stamp_ns(1_000_000_000, first_lsl_ts_sec=50.0) == 1_000_000_000
+
+
+def test_clock_aligner_tracks_lsl_spacing_within_band():
+    aligner = LslClockAligner(resync_threshold_sec=0.25)
+    aligner.stamp_ns(1_000_000_000, first_lsl_ts_sec=50.0)  # anchor ros=1.0s, lsl=50.0s
+    # LSL advanced 0.1 s; ROS arrival is a hair early (within band), so the stamp
+    # follows the sample clock (anchor + 0.1 s), not the jittery arrival time.
+    stamp = aligner.stamp_ns(1_080_000_000, first_lsl_ts_sec=50.1)
+    assert stamp == 1_100_000_000
+
+
+def test_clock_aligner_reanchors_when_drift_exceeds_threshold():
+    aligner = LslClockAligner(resync_threshold_sec=0.25)
+    aligner.stamp_ns(1_000_000_000, first_lsl_ts_sec=50.0)
+    # LSL says +1.0 s but ROS arrival is +1.4 s: 0.4 s drift > 0.25 s, so the
+    # aligner re-anchors on arrival instead of emitting the stale derived stamp.
+    stamp = aligner.stamp_ns(2_400_000_000, first_lsl_ts_sec=51.0)
+    assert stamp == 2_400_000_000
+    # Subsequent in-band samples now derive from the new anchor.
+    assert aligner.stamp_ns(2_700_000_000, first_lsl_ts_sec=51.3) == 2_700_000_000
+
+
+def test_clock_aligner_reset_reanchors_after_a_drop():
+    aligner = LslClockAligner()
+    aligner.stamp_ns(1_000_000_000, first_lsl_ts_sec=50.0)
+    aligner.reset()
+    # After a stream drop the LSL clock may be discontinuous; the next sample
+    # re-anchors rather than projecting across the gap.
+    assert aligner.stamp_ns(9_000_000_000, first_lsl_ts_sec=99.0) == 9_000_000_000
+
+
+def test_clock_aligner_stays_monotonic_when_lsl_outruns_ros():
+    # When the LSL clock runs ahead of ROS, the derived stamp climbs past arrival
+    # until the band trips; the re-anchor then snaps to arrival, which is *earlier*
+    # than the last emitted stamp. The aligner must hold the stamp, not step it
+    # backward (a backward header.stamp violates the ROS sensor-stream convention).
+    aligner = LslClockAligner(resync_threshold_sec=0.25)
+    aligner.stamp_ns(1_000_000_000, first_lsl_ts_sec=50.0)  # anchor
+    in_band = aligner.stamp_ns(1_100_000_000, first_lsl_ts_sec=50.3)  # derived 1.3, drift 0.2
+    assert in_band == 1_300_000_000
+    # LSL now 0.45 ahead while ROS advanced 0.15: derived 1.45 vs arrival 1.15 is
+    # 0.3 > 0.25, so it re-anchors to 1.15 but must not regress below 1.3.
+    after_resync = aligner.stamp_ns(1_150_000_000, first_lsl_ts_sec=50.45)
+    assert after_resync >= in_band
+    assert after_resync == 1_300_000_000
+
+
+def test_clock_aligner_does_not_resync_on_drained_backlog():
+    # An executor stall, then pull_chunk drains a 2 s backlog: the oldest sample is
+    # 2 s behind arrival but the newest is current. That must NOT be read as drift,
+    # and the frame must be stamped at the oldest sample's true time, not arrival.
+    aligner = LslClockAligner(resync_threshold_sec=0.25)
+    # First chunk anchors the newest sample (lsl 50.0) to arrival (ros 10.0 s).
+    aligner.stamp_ns(10_000_000_000, first_lsl_ts_sec=49.96, last_lsl_ts_sec=50.0)
+    # Backlog drains: oldest lsl 50.0, newest lsl 52.0; arrival 12.0 s -> the newest
+    # derives to exactly 12.0 s (in band), so no re-anchor; oldest stays at 10.0 s.
+    stamp = aligner.stamp_ns(12_000_000_000, first_lsl_ts_sec=50.0, last_lsl_ts_sec=52.0)
+    assert stamp == 10_000_000_000  # the oldest sample's true time, not arrival (12.0 s)
+
+
+def test_clock_aligner_exact_threshold_stays_in_band():
+    # The drift check is a strict >, so drift exactly equal to the threshold is in
+    # band and does not re-anchor. Pins the comparison against a >= regression.
+    aligner = LslClockAligner(resync_threshold_sec=0.25)
+    aligner.stamp_ns(1_000_000_000, first_lsl_ts_sec=50.0)  # anchor ros 1.0 / lsl 50.0
+    stamp = aligner.stamp_ns(1_250_000_000, first_lsl_ts_sec=50.5)  # derived 1.5, drift == 0.25
+    assert stamp == 1_500_000_000
+
+
+def test_clock_aligner_holds_on_backward_lsl_jump_within_band():
+    # The docstring claims the clamp absorbs a backward LSL jump; pin it. A within-
+    # band backward step in the LSL clock would regress the derived stamp, so the
+    # clamp holds it at the last emitted value instead.
+    aligner = LslClockAligner(resync_threshold_sec=0.25)
+    aligner.stamp_ns(1_000_000_000, first_lsl_ts_sec=50.0)
+    forward = aligner.stamp_ns(1_100_000_000, first_lsl_ts_sec=50.1)
+    assert forward == 1_100_000_000
+    held = aligner.stamp_ns(1_150_000_000, first_lsl_ts_sec=50.05)  # lsl steps back 0.05 s
+    assert held == 1_100_000_000
+
+
+def test_clock_aligner_reset_clears_monotonic_clamp():
+    aligner = LslClockAligner(resync_threshold_sec=0.25)
+    aligner.stamp_ns(5_000_000_000, first_lsl_ts_sec=50.0)  # last stamp 5.0 s
+    aligner.reset()
+    # A reconnect starts a fresh run: an earlier arrival re-anchors cleanly rather
+    # than being clamped up to the stale pre-drop stamp.
+    assert aligner.stamp_ns(2_000_000_000, first_lsl_ts_sec=10.0) == 2_000_000_000
+
+
+def test_clock_aligner_rejects_nonpositive_threshold():
+    # A zero/negative threshold would re-anchor on every chunk, silently degrading
+    # to arrival-time stamping while use_lsl_timestamps is still on. Fail fast.
+    with pytest.raises(ValueError, match="greater than 0"):
+        LslClockAligner(resync_threshold_sec=0.0)
+    with pytest.raises(ValueError, match="greater than 0"):
+        LslClockAligner(resync_threshold_sec=-1.0)
+
+
+def test_clock_aligner_constant_matches_one_second():
+    assert NANOSECONDS_PER_SECOND == 1_000_000_000

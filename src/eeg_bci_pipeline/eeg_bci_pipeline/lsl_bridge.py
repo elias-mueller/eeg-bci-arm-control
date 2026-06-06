@@ -17,7 +17,7 @@ subset of pylsl's API used here, mirroring ``MneRawLike`` in
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, Sequence
 
 import numpy as np
@@ -30,6 +30,130 @@ from eeg_bci_pipeline.eeg_frame_contract import default_channel_labels
 
 _MICROVOLT_UNITS = frozenset({"uv", "microvolt", "microvolts", "µv", "μv"})
 _VOLT_UNITS = frozenset({"v", "volt", "volts"})
+
+NANOSECONDS_PER_SECOND = 1_000_000_000
+# How far the LSL-derived stamp may wander from the actual ROS arrival time before
+# the aligner re-anchors. 0.25 s comfortably absorbs normal pull jitter at 250 Hz
+# while still bounding the offset a multi-minute session can accumulate.
+DEFAULT_RESYNC_THRESHOLD_SEC = 0.25
+
+
+def build_resolve_predicate(stream_name: str, stream_type: str) -> str:
+    """Build an LSL resolve predicate from an optional name and/or type.
+
+    Conjoins ``name='...'`` and ``type='...'`` so a same-named non-EEG stream is
+    not matched; at least one of the two must be non-empty. Single quotes are
+    rejected rather than escaped: LSL's XPath-subset predicate has no portable
+    escape, and a quote is never legitimate in a stream name or type here.
+    """
+
+    if "'" in stream_name or "'" in stream_type:
+        raise ValueError("stream_name and stream_type must not contain a single quote")
+    clauses: list[str] = []
+    if stream_name:
+        clauses.append(f"name='{stream_name}'")
+    if stream_type:
+        clauses.append(f"type='{stream_type}'")
+    if not clauses:
+        raise ValueError("set stream_name and/or stream_type to resolve an LSL stream")
+    return " and ".join(clauses)
+
+
+@dataclass
+class LslClockAligner:
+    """Map LSL sample-clock timestamps onto the ROS clock, re-anchoring on drift.
+
+    LSL stamps each sample on its own sample clock, which is not the ROS clock.
+    Anchoring ``(ros_time, lsl_time)`` at the first sample and deriving later stamps
+    as ``ros_anchor + (lsl_ts - lsl_anchor)`` preserves the inter-sample spacing the
+    stream reports, but a single fixed anchor lets the two clocks drift apart over a
+    long session (and silently absorbs a backward LSL jump). This re-anchors whenever
+    the *newest* sample's derived time leaves a ``resync_threshold_sec`` band around
+    the real arrival (ROS) time, bounding that drift while staying on the sample clock
+    within the band. Using the newest sample as the drift signal (not the oldest) is
+    deliberate: it keeps a drained processing backlog, where the oldest sample is far
+    behind arrival but the newest is recent, from being mistaken for drift.
+    :meth:`reset` re-arms it after a stream drop.
+
+    The emitted stamp is held monotonic non-decreasing: a re-anchor snaps the
+    timebase by up to ``resync_threshold_sec``, which would otherwise step the
+    published ``header.stamp`` backward when the LSL clock runs ahead of ROS. ROS
+    sensor streams must not go backward, so a re-anchor that would do so plateaus at
+    the last stamp until the clocks realign instead. (A smoothly slewed offset would
+    avoid the plateau too, at more complexity than this path warrants.)
+
+    Pure integer/float arithmetic (nanoseconds in, nanoseconds out) so the node's
+    timing logic is unit-testable without a ROS clock.
+    """
+
+    resync_threshold_sec: float = DEFAULT_RESYNC_THRESHOLD_SEC
+    _threshold_ns: int = field(default=0, init=False, repr=False)
+    _ros_anchor_ns: int | None = field(default=None, init=False, repr=False)
+    _lsl_anchor_sec: float = field(default=0.0, init=False, repr=False)
+    _last_stamp_ns: int | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.resync_threshold_sec <= 0.0:
+            raise ValueError("resync_threshold_sec must be greater than 0")
+        # Fixed once; recomputing the int threshold on every chunk (~50 Hz) is waste.
+        self._threshold_ns = round(self.resync_threshold_sec * NANOSECONDS_PER_SECOND)
+
+    def reset(self) -> None:
+        """Drop the anchor and clamp so the next sample starts a fresh monotonic run.
+
+        Called on a stream drop/reconnect, a genuine discontinuity: clearing the
+        last-stamp clamp too means an earlier-arriving reconnect re-anchors cleanly
+        instead of freezing at the stale pre-drop stamp.
+        """
+
+        self._ros_anchor_ns = None
+        self._last_stamp_ns = None
+
+    def stamp_ns(
+        self,
+        ros_now_ns: int,
+        first_lsl_ts_sec: float,
+        last_lsl_ts_sec: float | None = None,
+    ) -> int:
+        """Return the ROS-clock nanosecond stamp for a chunk's first sample.
+
+        ``last_lsl_ts_sec`` (the chunk's newest sample; defaults to the first) is the
+        drift signal, so a processing backlog is not mistaken for clock drift: the
+        newest sample is recent regardless of how many buffered samples drained, so
+        only a genuine offset of the newest sample from arrival re-anchors. The
+        emitted stamp is always derived for the first (oldest) sample, preserving its
+        true acquisition time even when a backlog is being drained.
+        """
+
+        if last_lsl_ts_sec is None:
+            last_lsl_ts_sec = first_lsl_ts_sec
+        anchor_ns = self._ros_anchor_ns
+        if (
+            anchor_ns is None
+            or abs(
+                ros_now_ns
+                - (
+                    anchor_ns
+                    + round((last_lsl_ts_sec - self._lsl_anchor_sec) * NANOSECONDS_PER_SECOND)
+                )
+            )
+            > self._threshold_ns
+        ):
+            # First sample, or the newest sample is genuinely off from arrival (clock
+            # drift, not a backlog): anchor the newest sample to the current arrival.
+            anchor_ns = ros_now_ns
+            self._ros_anchor_ns = ros_now_ns
+            self._lsl_anchor_sec = last_lsl_ts_sec
+        stamp_ns = anchor_ns + round(
+            (first_lsl_ts_sec - self._lsl_anchor_sec) * NANOSECONDS_PER_SECOND
+        )
+        # Hold monotonic non-decreasing and non-negative (see the class docstring): a
+        # re-anchor must never publish a stamp earlier than the last one.
+        floor_ns = 0 if self._last_stamp_ns is None else self._last_stamp_ns
+        if stamp_ns < floor_ns:
+            stamp_ns = floor_ns
+        self._last_stamp_ns = stamp_ns
+        return stamp_ns
 
 
 def import_pylsl() -> Any:

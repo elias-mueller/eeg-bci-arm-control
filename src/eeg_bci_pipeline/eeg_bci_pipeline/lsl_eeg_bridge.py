@@ -16,9 +16,9 @@ parameters, not code.
 from __future__ import annotations
 
 import rclpy
-from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 
 from eeg_bci_interfaces.msg import EegFrame
 from eeg_bci_pipeline.eeg_frame_contract import (
@@ -28,6 +28,9 @@ from eeg_bci_pipeline.eeg_frame_contract import (
     validate_eeg_frame_payload,
 )
 from eeg_bci_pipeline.lsl_bridge import (
+    DEFAULT_RESYNC_THRESHOLD_SEC,
+    LslClockAligner,
+    build_resolve_predicate,
     chunk_to_channel_major_uv,
     extract_lsl_metadata,
     import_pylsl,
@@ -64,6 +67,7 @@ class LslEegBridge(Node):
         self.declare_parameter("sampling_rate_tolerance_hz", DEFAULT_SAMPLING_RATE_TOLERANCE_HZ)
         self.declare_parameter("max_abs_sample_uv", DEFAULT_MAX_ABS_SAMPLE_UV)
         self.declare_parameter("use_lsl_timestamps", True)
+        self.declare_parameter("resync_threshold_sec", DEFAULT_RESYNC_THRESHOLD_SEC)
         self.declare_parameter("reconnect", True)
 
         self._source_id_param = str_param(self, "source_id")
@@ -85,8 +89,9 @@ class LslEegBridge(Node):
 
         self._dropped_frames = 0
         self._pull_errors = 0
-        self._ros_anchor = None
-        self._lsl_anchor = 0.0
+        self._clock_aligner = LslClockAligner(
+            resync_threshold_sec=float_param(self, "resync_threshold_sec")
+        )
 
         pylsl = import_pylsl()
         info = self._resolve_stream(pylsl)
@@ -115,19 +120,10 @@ class LslEegBridge(Node):
         return info
 
     def _resolve_predicate(self) -> str:
-        # Conjoin name and type so a same-named non-EEG stream is not matched.
         # Default stream_type="EEG"; clear it (stream_type:="") to resolve by name
-        # only for a headset that advertises a non-standard type.
-        if "'" in self._stream_name or "'" in self._stream_type:
-            raise RuntimeError("stream_name and stream_type must not contain a single quote")
-        clauses = []
-        if self._stream_name:
-            clauses.append(f"name='{self._stream_name}'")
-        if self._stream_type:
-            clauses.append(f"type='{self._stream_type}'")
-        if not clauses:
-            raise RuntimeError("set stream_name and/or stream_type to resolve an LSL stream")
-        return " and ".join(clauses)
+        # only for a headset that advertises a non-standard type. The predicate
+        # construction (conjunction, quote rejection) is a pure, tested helper.
+        return build_resolve_predicate(self._stream_name, self._stream_type)
 
     def _apply_metadata(self, meta) -> None:
         if self._expected_channel_count > 0 and meta.channel_count != self._expected_channel_count:
@@ -223,7 +219,7 @@ class LslEegBridge(Node):
             return
         if self._validate_frames and not self._frame_is_valid(samples):
             return
-        stamp = self._stamp_for_chunk(timestamps[0] if timestamps else 0.0)
+        stamp = self._stamp_for_chunk(timestamps)
         self._publish(samples, stamp)
 
     def _frame_is_valid(self, samples) -> bool:
@@ -262,20 +258,22 @@ class LslEegBridge(Node):
         frame.samples = samples
         self._publisher.publish(frame)
 
-    def _stamp_for_chunk(self, first_lsl_ts: float):
-        # Anchor the stream's LSL sample clock to the ROS clock at the first
-        # sample, then offset by elapsed LSL time (sample-clock-derived, monotonic).
-        # Arrival time is the explicit fallback per the EegFrame contract.
-        if not self._use_lsl_timestamps or first_lsl_ts == 0.0:
+    def _stamp_for_chunk(self, timestamps):
+        # Map the stream's LSL sample clock onto the ROS clock via the aligner. It
+        # uses the chunk's oldest (timestamps[0]) and newest (timestamps[-1]) sample
+        # times so a drained backlog is not mistaken for clock drift, and re-anchors
+        # on genuine drift so a long session does not accumulate offset. Arrival time
+        # is the explicit fallback (timestamps disabled, or a chunk with no LSL stamp)
+        # per the EegFrame contract.
+        if not self._use_lsl_timestamps or not timestamps or timestamps[0] == 0.0:
             return self.get_clock().now().to_msg()
-        if self._ros_anchor is None:
-            self._ros_anchor = self.get_clock().now()
-            self._lsl_anchor = first_lsl_ts
-        elapsed = max(first_lsl_ts - self._lsl_anchor, 0.0)
-        return (self._ros_anchor + Duration(seconds=elapsed)).to_msg()
+        stamp_ns = self._clock_aligner.stamp_ns(
+            self.get_clock().now().nanoseconds, timestamps[0], timestamps[-1]
+        )
+        return Time(nanoseconds=stamp_ns).to_msg()
 
     def _handle_pull_error(self, error) -> None:
-        self._ros_anchor = None
+        self._clock_aligner.reset()
         if not self._reconnect:
             self._timer.cancel()
             self.get_logger().error(
