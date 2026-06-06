@@ -31,6 +31,7 @@ setup(
             "model_intent_decoder = eeg_bci_pipeline.model_intent_decoder:main",
             "evaluate_hand_classifier = eeg_bci_pipeline.training.hand_classifier_cli:main",
             "intent_marker_publisher = eeg_bci_pipeline.intent_marker_publisher:main",
+            "calibrate_capture = eeg_bci_pipeline.calibrate_capture:main",
         ],
     },
 )

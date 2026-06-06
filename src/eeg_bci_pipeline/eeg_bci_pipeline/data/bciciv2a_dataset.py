@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol, Sequence, cast
@@ -161,3 +162,41 @@ def _annotation_description_key(description: str | bytes) -> str:
     if isinstance(description, bytes):
         return description.decode()
     return str(description)
+
+
+class JoblibLike(Protocol):
+    def dump(self, value: object, filename: str | Path) -> object: ...
+
+    def load(self, filename: str | Path) -> object: ...
+
+
+def _joblib() -> JoblibLike:
+    try:
+        return cast(JoblibLike, importlib.import_module("joblib"))
+    except ImportError as error:
+        raise RuntimeError(
+            "Saving or loading labeled epochs requires joblib. Install: python3-joblib"
+        ) from error
+
+
+def save_labeled_epochs(epochs: LabeledEpochs, output_path: str | Path) -> None:
+    """Persist captured labeled epochs as a joblib file."""
+
+    _joblib().dump(epochs, Path(output_path))
+
+
+def load_labeled_epochs(path: str | Path) -> LabeledEpochs:
+    """Load and validate persisted labeled epochs."""
+
+    epochs_path = Path(path)
+    if not epochs_path.is_file():
+        raise FileNotFoundError(f"labeled epochs file not found: {epochs_path}")
+    try:
+        epochs = _joblib().load(epochs_path)
+    except Exception as error:
+        raise ValueError(
+            f"could not read {epochs_path} as a LabeledEpochs .joblib file: {error}"
+        ) from error
+    if not isinstance(epochs, LabeledEpochs):
+        raise ValueError("file does not contain labeled epochs")
+    return epochs

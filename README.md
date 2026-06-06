@@ -94,6 +94,46 @@ scales to microvolts accordingly. `scale_to_microvolts` is only the fallback for
 stream that declares no recognized unit; set it then (e.g.
 `scale_to_microvolts:=1000000.0` for an unlabeled volts stream).
 
+## Calibration (record a same-montage model)
+
+A model only drives the arm from EEG whose channel labels and rate match the
+trained artifact, so a real BrainAccess MIDI session needs a model trained on
+*your* montage. `run-calibrate` records that calibration set: it shows left/right
+cues in RViz and saves one labeled motor-imagery epoch per trial from `/bci/eeg`.
+
+Stream the MIDI to LSL (a BrainAccess SDK/Board step) and place the dry electrodes
+over motor cortex (C3 / Cz / C4 matter most for left/right hand), then:
+
+```bash
+# Cued recording -> tmp/calibration-epochs.joblib (watch the RViz arrows).
+scripts/run-calibrate stream_name:=<headset stream>
+# Train a same-montage CSP+LDA model on the captured epochs.
+scripts/evaluate-hand-classifier tmp/calibration-epochs.joblib --save-model tmp/hand-16ch.joblib
+# Drive the arm from your live motor imagery (start_test_outlet:=false so the
+# bridge binds your headset, not the GDF test outlet).
+scripts/run-lsl start_test_outlet:=false model_path:=tmp/hand-16ch.joblib \
+    stream_name:=<headset stream> expected_channel_count:=16
+```
+
+Tune the protocol with `trials_per_class:=` (default 20), `epoch_sec:=`,
+`rest_sec:=`, `cue_sec:=`, `settle_sec:=`. Rest is the inter-trial baseline, not a
+trained class: training stays 2-class (left/right) and the runtime synthesizes
+rest below `rest_confidence_threshold`. Dry-electrode signal quality and
+motor-imagery difficulty dominate accuracy, so expect to iterate over a few
+sessions.
+
+Hardware-free plumbing test (no headset), replaying BCIC over LSL:
+
+```bash
+scripts/run-calibrate start_test_outlet:=true mode:=gdf trials_per_class:=2
+```
+
+The cues won't match the replayed brain activity, so the resulting model is at
+chance, but the capture -> train -> load chain is exercised end to end. Cross-
+validation is skipped automatically when a capture has too few epochs per class,
+and the model still saves: `scripts/evaluate-hand-classifier
+tmp/calibration-epochs.joblib --save-model tmp/test.joblib`.
+
 ## Mock robot behavior
 
 The mock robot launch maps decoded intents to `panda_joint2` (`rest` holds, `left_hand` moves negative, `right_hand` moves positive) while the other joints publish zero so `robot_state_publisher` keeps the full TF tree. `intent_joint_state_driver` ignores intents below `confidence_threshold` (default `0.55`), holds after `intent_timeout_sec` (default `0.3`) without messages, and drives `driven_joint_name` (default `panda_joint2`).

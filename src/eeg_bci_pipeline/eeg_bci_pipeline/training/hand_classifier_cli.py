@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from eeg_bci_pipeline.data.bciciv2a_dataset import read_bciciv2a_epochs
+from eeg_bci_pipeline.data.bciciv2a_dataset import load_labeled_epochs, read_bciciv2a_epochs
 from eeg_bci_pipeline.training.hand_classifier import (
     DEFAULT_BANDPASS_HIGH_HZ,
     DEFAULT_BANDPASS_LOW_HZ,
@@ -35,12 +35,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     bandpass_low_hz = None if args.no_bandpass else args.bandpass_low_hz
     bandpass_high_hz = None if args.no_bandpass else args.bandpass_high_hz
     class_labels = tuple(args.class_labels)
-    epochs = read_bciciv2a_epochs(
-        args.gdf_path,
-        tmin_sec=args.tmin_sec,
-        tmax_sec=args.tmax_sec,
-        class_labels=class_labels,
-    )
+    # A .gdf path is epoched on read; any other path is a saved LabeledEpochs file
+    # (e.g. from calibration capture), which is already epoched.
+    if args.input_path.suffix.lower() == ".gdf":
+        epochs = read_bciciv2a_epochs(
+            args.input_path,
+            tmin_sec=args.tmin_sec,
+            tmax_sec=args.tmax_sec,
+            class_labels=class_labels,
+        )
+        epoch_tmin_sec: float | None = args.tmin_sec
+        epoch_tmax_sec: float | None = args.tmax_sec
+    else:
+        # Captured epochs are already windowed; --tmin/--tmax are GDF-read-only, so
+        # None is the honest provenance (the artifact only stores samples_per_epoch).
+        epochs = load_labeled_epochs(args.input_path)
+        epoch_tmin_sec = None
+        epoch_tmax_sec = None
 
     if args.classifier == "eegnet":
         try:
@@ -66,17 +77,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             batch_size=args.batch_size,
         )
     else:
-        evaluation = evaluate_hand_classifier(
-            epochs,
-            class_labels=class_labels,
-            csp_components=args.csp_components,
-            cv_splits=args.cv_splits,
-            cv_random_state=args.cv_random_state,
-            bandpass_low_hz=bandpass_low_hz,
-            bandpass_high_hz=bandpass_high_hz,
-        )
+        try:
+            evaluation = evaluate_hand_classifier(
+                epochs,
+                class_labels=class_labels,
+                csp_components=args.csp_components,
+                cv_splits=args.cv_splits,
+                cv_random_state=args.cv_random_state,
+                bandpass_low_hz=bandpass_low_hz,
+                bandpass_high_hz=bandpass_high_hz,
+            )
+        except ValueError as error:
+            if args.save_model is None:
+                print(f"evaluation failed: {error}", file=sys.stderr)
+                return 1
+            # Too few epochs/class for cross-validation; still train and save the
+            # model the user asked for (training needs only >=1 epoch per class).
+            print(
+                f"cross-validation skipped ({error}); training on all captured epochs",
+                file=sys.stderr,
+            )
+            evaluation = None
 
-    print(format_evaluation_report(evaluation))
+    if evaluation is not None:
+        print(format_evaluation_report(evaluation))
     if args.save_model is not None:
         artifact = train_hand_classifier(
             epochs,
@@ -84,8 +108,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             csp_components=args.csp_components,
             bandpass_low_hz=bandpass_low_hz,
             bandpass_high_hz=bandpass_high_hz,
-            epoch_tmin_sec=args.tmin_sec,
-            epoch_tmax_sec=args.tmax_sec,
+            epoch_tmin_sec=epoch_tmin_sec,
+            epoch_tmax_sec=epoch_tmax_sec,
         )
         args.save_model.parent.mkdir(parents=True, exist_ok=True)
         save_hand_classifier_artifact(artifact, args.save_model)
@@ -95,12 +119,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Evaluate an offline hand classifier on BCIC IV 2a data."
+        description="Evaluate/train an offline hand classifier on a BCIC IV 2a GDF file "
+        "or a saved LabeledEpochs .joblib (e.g. from calibration capture)."
     )
     parser.add_argument(
-        "gdf_path",
+        "input_path",
         type=Path,
-        help="Path to a BCIC IV 2a GDF recording, for example data/raw/bciciv2a/A01T.gdf.",
+        help=(
+            "A BCIC IV 2a GDF recording (e.g. data/raw/bciciv2a/A01T.gdf), or a saved "
+            "LabeledEpochs .joblib file (e.g. tmp/calibration-epochs.joblib) from calibration capture."
+        ),
     )
     parser.add_argument(
         "--classifier",
@@ -108,8 +136,18 @@ def _build_parser() -> argparse.ArgumentParser:
         default="csp-lda",
         help="Classifier to evaluate. Default: csp-lda.",
     )
-    parser.add_argument("--tmin-sec", type=float, default=DEFAULT_EPOCH_TMIN_SEC)
-    parser.add_argument("--tmax-sec", type=float, default=DEFAULT_EPOCH_TMAX_SEC)
+    parser.add_argument(
+        "--tmin-sec",
+        type=float,
+        default=DEFAULT_EPOCH_TMIN_SEC,
+        help="Epoch start (GDF input only).",
+    )
+    parser.add_argument(
+        "--tmax-sec",
+        type=float,
+        default=DEFAULT_EPOCH_TMAX_SEC,
+        help="Epoch end (GDF input only).",
+    )
     parser.add_argument(
         "--class-labels",
         nargs="+",

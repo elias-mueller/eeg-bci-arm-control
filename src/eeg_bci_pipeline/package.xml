@@ -17,6 +17,7 @@
   <exec_depend>python3-mne</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-sklearn</exec_depend>
+  <exec_depend>python3-joblib</exec_depend>
   <!-- LSL (Lab Streaming Layer) has no apt/rosdep package: liblsl, python3-pylsl,
        and mne-lsl are all absent from the Ubuntu + ROS repos. The LSL nodes
        (lsl_eeg_bridge, lsl_test_outlet) lazy-import pylsl, installed via

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=scripts/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+enter_ros_workspace
+
+# enter_ros_workspace puts the repo .venv on PYTHONPATH, so this import check sees
+# the same pylsl the launched nodes will (catches a missing pylsl or liblsl).
+if ! python3 -c "import pylsl" >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+pylsl (or its native liblsl) is not available. Set up the Python env:
+  scripts/setup-python-env
+EOF
+  exit 127
+fi
+
+exec ros2 launch eeg_bci_pipeline calibrate.launch.py "$@"
