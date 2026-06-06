@@ -134,6 +134,14 @@ validation is skipped automatically when a capture has too few epochs per class,
 and the model still saves: `scripts/evaluate-hand-classifier
 tmp/calibration-epochs.joblib --save-model tmp/test.joblib`.
 
+That replay demo only validates plumbing. The decode path itself is validated
+hardware-free in `test/test_decode_validation.py`: cue-aligned, class-separable
+epochs trained through the capture container score well above chance (and a
+shuffled-label control collapses to chance), and real BCIC IV 2a motor imagery
+re-assembled through the same container decodes above chance when the dataset is
+present. The cue-to-content alignment of the capture node itself is covered in
+`test/test_calibrate_capture_node.py`.
+
 ## Mock robot behavior
 
 The mock robot launch maps decoded intents to `panda_joint2` (`rest` holds, `left_hand` moves negative, `right_hand` moves positive) while the other joints publish zero so `robot_state_publisher` keeps the full TF tree. `intent_joint_state_driver` ignores intents below `confidence_threshold` (default `0.55`), holds after `intent_timeout_sec` (default `0.3`) without messages, and drives `driven_joint_name` (default `panda_joint2`).
