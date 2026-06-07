@@ -22,6 +22,11 @@ echo "Installing requirements.txt into ${venv_dir}"
 "$venv_dir/bin/python" -m pip install --upgrade pip >/dev/null
 "$venv_dir/bin/python" -m pip install -r requirements.txt
 
+if [ -f requirements-dev.txt ]; then
+  echo "Installing requirements-dev.txt into ${venv_dir} (test tooling: pytest-cov)"
+  "$venv_dir/bin/python" -m pip install -r requirements-dev.txt
+fi
+
 # pylsl loads the native liblsl at import, so this checks both the wrapper and the
 # C library in one shot. liblsl has no apt/rosdep package; install the SCCN .deb.
 if "$venv_dir/bin/python" - <<'PY'

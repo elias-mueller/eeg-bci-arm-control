@@ -1,0 +1,4 @@
+# Developer/test-only pip deps installed into the repo .venv by
+# scripts/setup-python-env. Kept separate from requirements.txt (runtime-only).
+# pytest-cov powers scripts/coverage; it pulls the coverage library transitively.
+pytest-cov>=4

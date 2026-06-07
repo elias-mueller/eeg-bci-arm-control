@@ -42,3 +42,29 @@ select = [
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.coverage.run]
+# Measure only the pipeline package; tests, launch files, and build/install
+# artifacts are outside it and so are not counted.
+source = ["eeg_bci_pipeline"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+precision = 1
+fail_under = 100
+exclude_lines = [
+  # Lines marked as intentionally-untested wiring (rclpy main() spin loops and
+  # optional-dependency import guards carry a per-line "# pragma: no cover").
+  "pragma: no cover",
+  # Script entry points and type-only blocks never run under pytest.
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  # Structural-typing Protocols are shapes for the type checker; their method
+  # bodies (``...``) carry no runtime behavior and are never executed.
+  "class .*\\bProtocol\\b.*:",
+]
+
+[tool.coverage.html]
+directory = "tmp/coverage_html"

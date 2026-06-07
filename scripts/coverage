@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=scripts/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+# Branch-coverage report for the Python pipeline package, gated by the
+# fail_under threshold in pyproject.toml [tool.coverage.report].
+#
+# Runs pytest directly (not via colcon) on purpose: colcon test executes the
+# installed copy under install/, which makes coverage map to the wrong tree.
+# Running the source tests with src/ ahead on PYTHONPATH maps coverage onto the
+# editable package, so term-missing line numbers match the files you edit.
+#
+# ROS + the built workspace are sourced for rclpy and the generated interfaces;
+# nodes that need them skip cleanly (pytest.importorskip) when absent.
+#
+# Extra pytest args pass through (e.g. scripts/coverage -k lsl_bridge), but a
+# filtered run will trip the 100% gate, so use that only for local iterating.
+source_ros_workspace_optional
+cd "$repo_root" || exit 1
+# Editable source ahead of the installed copy so coverage maps to src/.
+export PYTHONPATH="${repo_root}/src/eeg_bci_pipeline${PYTHONPATH:+:${PYTHONPATH}}"
+
+py="${repo_root}/.venv/bin/python"
+# Fail fast with clear guidance instead of a misleading low-coverage number.
+if ! "$py" -c "import pytest_cov" 2>/dev/null; then
+  echo "pytest-cov is missing from .venv. Run: scripts/setup-python-env" >&2
+  exit 127
+fi
+if ! "$py" -c "import rclpy" 2>/dev/null; then
+  echo "rclpy is not importable (ROS not sourced, or workspace not built)." >&2
+  echo "Install ROS and run: scripts/build" >&2
+  exit 127
+fi
+
+exec "$py" -m pytest \
+  "${repo_root}/src/eeg_bci_pipeline/test" \
+  --cov=eeg_bci_pipeline \
+  --cov-report=term-missing \
+  --cov-report=html \
+  "$@"
