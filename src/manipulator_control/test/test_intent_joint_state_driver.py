@@ -111,6 +111,29 @@ class TestIntentJointStateDriver(unittest.TestCase):
         self.assertGreaterEqual(left_position, -JOINT_LIMIT_RAD - 0.01)
         self.assertLess(left_position, -JOINT_LIMIT_RAD + 0.1)
 
+    def test_unknown_intent_label_is_ignored(self):
+        self.assertTrue(
+            self._spin_until(
+                lambda: self.publisher.get_subscription_count() > 0 and self.joint_states
+            )
+        )
+
+        # Nudge to a strictly-interior position so "held" is distinguishable from
+        # "pinned at a clamp" (a non-zero unknown velocity of either sign would move
+        # the joint off this point). A short drive never reaches the 0.4 clamp.
+        self._publish_intent_for("right_hand", 0.95, 0.15)
+        self.assertLess(abs(self._latest_driven_joint_position()), JOINT_LIMIT_RAD - 0.05)
+
+        # Switch to the unknown label and let the previous command expire and the
+        # zero-velocity command settle (one handoff tick can still apply the old
+        # velocity), then confirm the joint holds across a further window. The
+        # baseline is captured after the settle, not before, so the handoff tick
+        # cannot be mistaken for motion under the unknown label.
+        self._publish_intent_for("blink", 0.95, INTENT_TIMEOUT_SEC + 0.3)
+        settled = self._latest_driven_joint_position()
+        self._publish_intent_for("blink", 0.95, 0.3)
+        self.assertAlmostEqual(self._latest_driven_joint_position(), settled, delta=0.02)
+
     def _publish_intent_for(self, label, confidence, duration_sec):
         intent = Intent()
         intent.label = label

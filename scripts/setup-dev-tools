@@ -36,6 +36,8 @@ install_tool() {
 
 install_tool ruff ruff
 install_tool basedpyright basedpyright
+# gcovr wraps gcov for the C++ line-coverage report (scripts/coverage-cpp).
+install_tool gcovr gcovr
 
 pipx ensurepath >/dev/null 2>&1 || true
 

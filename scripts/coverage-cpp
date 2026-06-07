@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=scripts/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+# C++ line coverage for manipulator_control. Builds with gcov instrumentation
+# into ISOLATED build/install trees (under gitignored tmp/) so the normal build/
+# cache is never left carrying -DMANIPULATOR_CONTROL_COVERAGE=ON or a Debug build
+# type. Runs the launch tests so the instrumented binaries execute, then reports
+# with gcovr and enforces a line floor. Pairs with scripts/coverage (Python).
+# gcovr comes from scripts/setup-dev-tools (pipx).
+require_ros
+prepend_pipx_bin
+source_ros
+prepend_venv_site_packages
+cd "$repo_root" || exit 1
+
+if ! command -v gcovr >/dev/null 2>&1; then
+  echo "gcovr not found. Run: scripts/setup-dev-tools" >&2
+  exit 127
+fi
+
+build_base="${repo_root}/tmp/coverage-build"
+install_base="${repo_root}/tmp/coverage-install"
+build_dir="${build_base}/manipulator_control"
+
+echo "Building manipulator_control with gcov instrumentation"
+colcon build \
+  --packages-up-to manipulator_control \
+  --build-base "$build_base" \
+  --install-base "$install_base" \
+  --cmake-args -DMANIPULATOR_CONTROL_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+
+# Clear any stale counters from a previous run before exercising the binaries.
+find "$build_dir" -name '*.gcda' -delete 2>/dev/null || true
+
+echo "Running manipulator_control launch tests"
+# ROS setup scripts are not nounset-clean; toggle -u off around sourcing.
+set +u
+source "${install_base}/setup.bash"
+set -u
+# --return-code-on-test-failure so a failing launch test fails this script (set
+# -e) instead of silently reporting coverage on a broken run.
+colcon test \
+  --packages-select manipulator_control \
+  --build-base "$build_base" \
+  --install-base "$install_base" \
+  --return-code-on-test-failure
+colcon test-result --test-result-base "$build_base" --verbose
+
+echo "Coverage report (manipulator_control C++):"
+mkdir -p "${repo_root}/tmp/coverage_cpp"
+gcovr \
+  --root "${repo_root}/src/manipulator_control" \
+  --object-directory "$build_dir" \
+  --html-details "${repo_root}/tmp/coverage_cpp/index.html" \
+  --print-summary \
+  --exclude-unreachable-branches \
+  --fail-under-line 95
+echo "HTML report: tmp/coverage_cpp/index.html"

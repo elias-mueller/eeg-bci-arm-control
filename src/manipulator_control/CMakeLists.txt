@@ -9,6 +9,19 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# Opt-in gcov instrumentation for C++ line coverage (off for normal builds so
+# release binaries are unaffected). Enable via scripts/coverage-cpp, which builds
+# with -DMANIPULATOR_CONTROL_COVERAGE=ON, runs the launch tests, and reports with
+# gcovr. Applied before the targets so both executables are instrumented.
+option(MANIPULATOR_CONTROL_COVERAGE "Instrument C++ targets with gcov coverage" OFF)
+if(MANIPULATOR_CONTROL_COVERAGE)
+  if(NOT (CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+    message(FATAL_ERROR "MANIPULATOR_CONTROL_COVERAGE requires GCC or Clang")
+  endif()
+  add_compile_options(--coverage -O0 -g)
+  add_link_options(--coverage)
+endif()
+
 find_package(ament_cmake REQUIRED)
 find_package(eeg_bci_interfaces REQUIRED)
 find_package(rcl_interfaces REQUIRED)
@@ -45,6 +58,7 @@ if(BUILD_TESTING)
   find_package(launch_testing_ament_cmake REQUIRED)
 
   add_launch_test(test/test_intent_joint_state_driver.py)
+  add_launch_test(test/test_intent_command_logger.py)
 endif()
 
 ament_package()
