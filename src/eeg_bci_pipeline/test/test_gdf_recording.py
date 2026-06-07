@@ -4,6 +4,7 @@ from eeg_bci_pipeline.data.gdf_recording import (
     VOLTS_TO_MICROVOLTS,
     iter_replay_frames,
     normalize_channel_labels,
+    read_gdf_recording,
     recording_from_mne_raw,
     replay_elapsed_sec,
 )
@@ -98,3 +99,105 @@ def test_replay_elapsed_sec_keeps_looped_replay_time_monotonic():
         samples_per_channel=100,
         sampling_rate_hz=10.0,
     ) == pytest.approx(22.0)
+
+
+def test_read_gdf_recording_reads_via_mne_and_derives_source_from_path(monkeypatch):
+    mne = pytest.importorskip("mne")
+
+    captured = {}
+
+    def fake_read_raw_gdf(path, **kwargs):
+        captured["path"] = path
+        captured["kwargs"] = kwargs
+        return FakeRaw()
+
+    monkeypatch.setattr(mne.io, "read_raw_gdf", fake_read_raw_gdf)
+
+    recording = read_gdf_recording("/data/sessions/A03T.gdf")
+
+    assert recording.source_id == "A03T"
+    assert recording.sampling_rate_hz == pytest.approx(250.0)
+    assert recording.channel_labels == ("C3", "Cz")
+    assert recording.samples_uv[0, 0] == pytest.approx(1e-6 * VOLTS_TO_MICROVOLTS)
+    # MNE is asked to preload the actual recording it returns.
+    assert captured["kwargs"]["preload"] is True
+
+
+def test_recording_from_mne_raw_empty_labels_fall_back_to_detected_eeg_channels():
+    recording = recording_from_mne_raw(
+        FakeRaw(),
+        source_id="A01T",
+        channel_labels=[],
+    )
+
+    assert recording.channel_labels == ("C3", "Cz")
+
+
+@pytest.mark.parametrize("samples_per_frame", [0, -1])
+def test_iter_replay_frames_rejects_non_positive_frame_size(samples_per_frame):
+    recording = recording_from_mne_raw(FakeRaw(), source_id="A01T")
+
+    with pytest.raises(ValueError, match="at least 1"):
+        list(iter_replay_frames(recording, samples_per_frame=samples_per_frame))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        (
+            {
+                "sample_index": -1,
+                "loop_index": 0,
+                "samples_per_channel": 10,
+                "sampling_rate_hz": 1.0,
+            },
+            "sample_index must be non-negative",
+        ),
+        (
+            {
+                "sample_index": 0,
+                "loop_index": -1,
+                "samples_per_channel": 10,
+                "sampling_rate_hz": 1.0,
+            },
+            "loop_index must be non-negative",
+        ),
+        (
+            {
+                "sample_index": 0,
+                "loop_index": 0,
+                "samples_per_channel": 0,
+                "sampling_rate_hz": 1.0,
+            },
+            "samples_per_channel must be at least 1",
+        ),
+        (
+            {
+                "sample_index": 10,
+                "loop_index": 0,
+                "samples_per_channel": 10,
+                "sampling_rate_hz": 1.0,
+            },
+            "less than samples_per_channel",
+        ),
+        (
+            {
+                "sample_index": 0,
+                "loop_index": 0,
+                "samples_per_channel": 10,
+                "sampling_rate_hz": 0.0,
+            },
+            "greater than 0",
+        ),
+    ],
+)
+def test_replay_elapsed_sec_guards_reject_invalid_arguments(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        replay_elapsed_sec(kwargs.pop("sample_index"), **kwargs)
+
+
+def test_normalize_channel_labels_rejects_non_iterable_input():
+    with pytest.raises(ValueError, match="sequence of labels") as exc_info:
+        normalize_channel_labels(123)  # type: ignore[arg-type]
+
+    assert isinstance(exc_info.value.__cause__, TypeError)

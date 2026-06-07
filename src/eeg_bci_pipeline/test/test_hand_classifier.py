@@ -1,14 +1,22 @@
+import importlib
+
 import numpy as np
 import pytest
 from eeg_bci_pipeline.data.bciciv2a_dataset import LabeledEpochs
 from eeg_bci_pipeline.training.hand_classifier import (
+    HAND_CLASSIFIER_ARTIFACT_VERSION,
     HandClassifierArtifact,
     HandClassifierEvaluation,
+    HandTrainingData,
+    _validate_artifact_epoch_shape,
+    _validate_csp_components,
     evaluate_hand_classifier,
     format_evaluation_report,
     load_hand_classifier_artifact,
+    maybe_bandpass_epochs,
     predict_hand_classifier,
     predict_hand_proba,
+    resolve_cv_splits,
     save_hand_classifier_artifact,
     select_hand_epochs,
     train_hand_classifier,
@@ -214,3 +222,192 @@ def test_format_evaluation_report_eegnet_omits_csp_components():
 
     assert "Hand classifier evaluation (eegnet)" in report
     assert "csp components" not in report
+
+
+def make_artifact(pipeline: object, **overrides: object) -> HandClassifierArtifact:
+    defaults: dict[str, object] = dict(
+        source_id="fake",
+        sampling_rate_hz=100.0,
+        channel_labels=("a", "b", "c", "d"),
+        class_labels=("left_hand", "right_hand"),
+        class_counts=(1, 1),
+        samples_per_epoch=8,
+        pipeline=pipeline,
+        bandpass_low_hz=None,
+        bandpass_high_hz=None,
+    )
+    defaults.update(overrides)
+    return HandClassifierArtifact(**defaults)  # type: ignore[arg-type]
+
+
+def test_hand_training_data_epoch_count_reports_leading_dimension():
+    training_data = HandTrainingData(
+        source_id="synthetic",
+        sampling_rate_hz=100.0,
+        channel_labels=("C3", "Cz", "C4", "Pz"),
+        class_labels=("left_hand", "right_hand"),
+        class_counts=(2, 1),
+        epochs_uv=np.zeros((3, 4, 8), dtype=np.float64),
+        encoded_labels=np.array([0, 0, 1], dtype=np.int_),
+    )
+
+    assert training_data.epoch_count == 3
+    assert training_data.channel_count == 4
+    assert training_data.samples_per_epoch == 8
+
+
+def test_select_hand_epochs_rejects_fewer_than_two_classes():
+    epochs = make_labeled_epochs(("left_hand", "right_hand"))
+
+    with pytest.raises(ValueError, match="at least two classes"):
+        select_hand_epochs(epochs, class_labels=("left_hand",))
+
+
+def test_select_hand_epochs_rejects_duplicate_classes():
+    epochs = make_labeled_epochs(("left_hand", "right_hand"))
+
+    with pytest.raises(ValueError, match="unique"):
+        select_hand_epochs(epochs, class_labels=("left_hand", "left_hand"))
+
+
+def test_select_hand_epochs_rejects_no_matching_epochs():
+    epochs = make_labeled_epochs(("feet", "tongue", "feet"))
+
+    with pytest.raises(ValueError, match="no epochs found"):
+        select_hand_epochs(epochs, class_labels=("left_hand", "right_hand"))
+
+
+def test_load_hand_classifier_artifact_rejects_wrong_type(tmp_path):
+    joblib = importlib.import_module("joblib")
+    output_path = tmp_path / "not-an-artifact.joblib"
+    joblib.dump({"not": "an artifact"}, output_path)
+
+    with pytest.raises(ValueError, match="does not contain a hand classifier"):
+        load_hand_classifier_artifact(output_path)
+
+
+def test_load_hand_classifier_artifact_rejects_version_mismatch(tmp_path):
+    artifact = make_artifact(
+        object(),
+        artifact_version=HAND_CLASSIFIER_ARTIFACT_VERSION + 1,
+    )
+    output_path = tmp_path / "stale-version.joblib"
+    save_hand_classifier_artifact(artifact, output_path)
+
+    with pytest.raises(ValueError, match="unsupported hand classifier artifact version"):
+        load_hand_classifier_artifact(output_path)
+
+
+def test_predict_hand_classifier_rejects_out_of_range_index():
+    class _OutOfRangePipeline:
+        def predict(self, epochs):
+            return np.full(np.asarray(epochs).shape[0], 5, dtype=np.int_)
+
+    artifact = make_artifact(_OutOfRangePipeline())
+
+    with pytest.raises(ValueError, match="unknown class index"):
+        predict_hand_classifier(artifact, np.zeros((2, 4, 8)))
+
+
+def test_predict_hand_proba_requires_predict_proba_support():
+    class _HardOnlyPipeline:
+        def predict(self, epochs):
+            return np.zeros(np.asarray(epochs).shape[0], dtype=np.int_)
+
+    artifact = make_artifact(_HardOnlyPipeline())
+
+    with pytest.raises(RuntimeError, match="does not support probability output"):
+        predict_hand_proba(artifact, np.zeros((1, 4, 8)))
+
+
+def test_predict_hand_proba_rejects_out_of_range_class_order():
+    class _BadClassOrderPipeline:
+        classes_ = np.array([0, 9])
+
+        def predict_proba(self, epochs):
+            n = np.asarray(epochs).shape[0]
+            return np.tile([0.6, 0.4], (n, 1))
+
+    artifact = make_artifact(_BadClassOrderPipeline())
+
+    with pytest.raises(ValueError, match="unknown class index"):
+        predict_hand_proba(artifact, np.zeros((1, 4, 8)))
+
+
+def test_maybe_bandpass_epochs_rejects_partial_band_specification():
+    epochs = np.zeros((2, 4, 8), dtype=np.float64)
+
+    with pytest.raises(ValueError, match="both be set or both disabled"):
+        maybe_bandpass_epochs(epochs, sampling_rate_hz=100.0, low_hz=8.0, high_hz=None)
+
+
+def test_maybe_bandpass_epochs_rejects_non_positive_low():
+    epochs = np.zeros((2, 4, 8), dtype=np.float64)
+
+    with pytest.raises(ValueError, match="low frequency must be greater than 0"):
+        maybe_bandpass_epochs(epochs, sampling_rate_hz=100.0, low_hz=0.0, high_hz=30.0)
+
+
+def test_maybe_bandpass_epochs_rejects_high_not_above_low():
+    epochs = np.zeros((2, 4, 8), dtype=np.float64)
+
+    with pytest.raises(ValueError, match="high frequency must be greater than low"):
+        maybe_bandpass_epochs(epochs, sampling_rate_hz=100.0, low_hz=30.0, high_hz=30.0)
+
+
+def test_maybe_bandpass_epochs_rejects_high_at_or_above_nyquist():
+    epochs = np.zeros((2, 4, 8), dtype=np.float64)
+
+    with pytest.raises(ValueError, match="below Nyquist"):
+        maybe_bandpass_epochs(epochs, sampling_rate_hz=100.0, low_hz=8.0, high_hz=50.0)
+
+
+def test_maybe_bandpass_epochs_attenuates_out_of_band_content():
+    pytest.importorskip("mne")
+    time = np.arange(256, dtype=float) / 100.0
+    in_band = np.sin(2.0 * np.pi * 15.0 * time)
+    out_of_band = np.sin(2.0 * np.pi * 1.0 * time)
+    epochs = (in_band + out_of_band)[None, None, :].repeat(3, axis=1)
+
+    filtered = maybe_bandpass_epochs(epochs, sampling_rate_hz=100.0, low_hz=8.0, high_hz=30.0)
+
+    assert filtered.shape == epochs.shape
+    # The 1 Hz drift sits well below the 8 Hz lower edge, so the band-passed signal
+    # tracks the 15 Hz component far more closely than the unfiltered mixture does.
+    filtered_error = float(np.std(filtered[0, 0] - in_band))
+    unfiltered_error = float(np.std(epochs[0, 0] - in_band))
+    assert filtered_error < unfiltered_error
+
+
+def test_resolve_cv_splits_rejects_fewer_than_two_splits():
+    with pytest.raises(ValueError, match="cv_splits must be at least 2"):
+        resolve_cv_splits(1, (8, 8))
+
+
+def test_resolve_cv_splits_rejects_class_with_single_epoch():
+    with pytest.raises(ValueError, match="at least two epochs"):
+        resolve_cv_splits(5, (8, 1))
+
+
+def test_validate_csp_components_rejects_fewer_than_one():
+    with pytest.raises(ValueError, match="csp_components must be at least 1"):
+        _validate_csp_components(0, channel_count=4)
+
+
+def test_validate_csp_components_rejects_more_than_channels():
+    with pytest.raises(ValueError, match="must not exceed channel count"):
+        _validate_csp_components(5, channel_count=4)
+
+
+def test_validate_artifact_epoch_shape_rejects_wrong_dimensionality():
+    artifact = make_artifact(object())
+
+    with pytest.raises(ValueError, match=r"shape \(n_epochs, n_channels, n_samples\)"):
+        _validate_artifact_epoch_shape(artifact, np.zeros((4, 8)))
+
+
+def test_validate_artifact_epoch_shape_rejects_channel_mismatch():
+    artifact = make_artifact(object())
+
+    with pytest.raises(ValueError, match="channel count does not match artifact"):
+        _validate_artifact_epoch_shape(artifact, np.zeros((1, 3, 8)))

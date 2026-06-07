@@ -1,12 +1,12 @@
 import pytest
 from eeg_bci_pipeline.data.gdf_recording import VOLTS_TO_MICROVOLTS
 from eeg_bci_pipeline.lsl_bridge import (
-    NANOSECONDS_PER_SECOND,
     LslClockAligner,
     build_resolve_predicate,
     channel_major_to_sample_major,
     chunk_to_channel_major_uv,
     extract_lsl_metadata,
+    import_pylsl,
     resolve_channel_labels,
     unit_scale_for,
 )
@@ -426,5 +426,53 @@ def test_clock_aligner_rejects_nonpositive_threshold():
         LslClockAligner(resync_threshold_sec=-1.0)
 
 
-def test_clock_aligner_constant_matches_one_second():
-    assert NANOSECONDS_PER_SECOND == 1_000_000_000
+# --- import_pylsl ------------------------------------------------------------
+
+
+def test_import_pylsl_returns_the_pylsl_module():
+    # pylsl is optional (installed by scripts/setup-python-env, not apt), so skip
+    # cleanly when it is absent rather than erroring. When present, the lazy helper
+    # must hand back the real module (the node reads StreamInlet etc. off it).
+    direct = pytest.importorskip("pylsl")
+
+    assert import_pylsl() is direct
+    assert hasattr(direct, "StreamInfo")
+
+
+# --- non-positive channel_count guards --------------------------------------
+
+
+def test_resolve_channel_labels_rejects_non_positive_channel_count():
+    with pytest.raises(ValueError, match="at least 1"):
+        resolve_channel_labels(["C3", "Cz"], 0)
+    with pytest.raises(ValueError, match="at least 1"):
+        resolve_channel_labels(["C3", "Cz"], -3)
+
+
+def test_chunk_to_channel_major_uv_rejects_non_positive_channel_count():
+    with pytest.raises(ValueError, match="at least 1"):
+        chunk_to_channel_major_uv([[1.0]], 0)
+    with pytest.raises(ValueError, match="at least 1"):
+        chunk_to_channel_major_uv([[1.0]], -1)
+
+
+def test_channel_major_to_sample_major_rejects_non_positive_channel_count():
+    with pytest.raises(ValueError, match="at least 1"):
+        channel_major_to_sample_major([1.0, 2.0], 0)
+    with pytest.raises(ValueError, match="at least 1"):
+        channel_major_to_sample_major([1.0, 2.0], -2)
+
+
+# --- declared unit walk ------------------------------------------------------
+
+
+def test_extract_lsl_metadata_skips_empty_unit_and_keeps_first_declared():
+    # The first channel declares no unit (empty string) so the walk must not latch
+    # onto it and must keep scanning; the second channel's "volts" becomes the
+    # stream unit. Pins the "first *non-empty* unit wins" rule.
+    info = FakeStreamInfo(channel_count=2, channels=[("C3", ""), ("Cz", "volts")])
+
+    meta = extract_lsl_metadata(info)
+
+    assert meta.channel_labels == ("C3", "Cz")
+    assert meta.declared_unit == "volts"

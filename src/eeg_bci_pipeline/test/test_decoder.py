@@ -58,6 +58,33 @@ def test_empty_class_labels_are_rejected():
         decode_mock_intent([1.0], class_labels=())
 
 
+@pytest.mark.parametrize(
+    "samples",
+    [
+        [1.0, -1.0],
+        [200.0, -200.0],
+        [0.0, 0.0, 0.0],
+    ],
+)
+def test_single_class_probabilities_collapse_to_one_hot(samples):
+    # A single-class decoder can only ever pick that class, so the one-hot
+    # vector is a degenerate (1.0,) no matter how much energy the frame carries.
+    prediction = decode_mock_intent(samples, class_labels=("only",))
+
+    assert prediction.label == "only"
+    assert prediction.class_labels == ("only",)
+    assert prediction.probabilities == pytest.approx((1.0,))
+    assert sum(prediction.probabilities) == pytest.approx(1.0)
+
+
+def test_single_class_empty_samples_have_full_confidence():
+    prediction = decode_mock_intent([], class_labels=("only",))
+
+    assert prediction.label == "only"
+    assert prediction.confidence == pytest.approx(1.0)
+    assert prediction.probabilities == pytest.approx((1.0,))
+
+
 def test_default_mock_signal_cycle_reaches_all_intent_buckets():
     labels = []
     for frame_index in (0, 10, 20):

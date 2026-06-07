@@ -5,6 +5,7 @@ from eeg_bci_pipeline.model_decode import (
     SlidingEpochBuffer,
     decode_window,
     gate_intent,
+    rest_intent,
     runtime_labels_for_artifact,
 )
 from eeg_bci_pipeline.training.hand_classifier import train_hand_classifier
@@ -30,6 +31,26 @@ def make_labeled_epochs(labels: tuple[str, ...]) -> LabeledEpochs:
         start_sample_indices=tuple(index * 100 for index, _ in enumerate(labels)),
         epochs_uv=epochs,
     )
+
+
+def test_sliding_buffer_rejects_nonpositive_channel_count():
+    with pytest.raises(ValueError, match="channel_count must be at least 1"):
+        SlidingEpochBuffer(channel_count=0, samples_per_epoch=4)
+    with pytest.raises(ValueError, match="channel_count must be at least 1"):
+        SlidingEpochBuffer(channel_count=-1, samples_per_epoch=4)
+
+
+def test_sliding_buffer_rejects_nonpositive_samples_per_epoch():
+    with pytest.raises(ValueError, match="samples_per_epoch must be at least 1"):
+        SlidingEpochBuffer(channel_count=2, samples_per_epoch=0)
+    with pytest.raises(ValueError, match="samples_per_epoch must be at least 1"):
+        SlidingEpochBuffer(channel_count=2, samples_per_epoch=-1)
+
+
+def test_sliding_buffer_rejects_multidimensional_frame():
+    buffer = SlidingEpochBuffer(channel_count=2, samples_per_epoch=4)
+    with pytest.raises(ValueError, match="1-D channel-major"):
+        buffer.push([[10.0, 11.0], [20.0, 21.0]])  # 2-D, not flat channel-major
 
 
 def test_sliding_buffer_warms_up_then_fills_in_order():
@@ -111,6 +132,11 @@ def test_runtime_labels_reject_empty_and_duplicates():
         runtime_labels_for_artifact(("left_hand", "left_hand"))
 
 
+def test_rest_intent_rejects_runtime_labels_without_rest():
+    with pytest.raises(ValueError, match="rest label"):
+        rest_intent(("left_hand", "right_hand"))
+
+
 def test_gate_intent_reports_confident_winner():
     intent = gate_intent([0.9, 0.1], ("left_hand", "right_hand"), rest_threshold=0.6)
 
@@ -152,6 +178,18 @@ def test_gate_intent_validates_inputs():
             [0.6, 0.4],
             ("left_hand", "right_hand"),
             runtime_class_labels=("left_hand", "right_hand"),
+        )
+
+
+def test_gate_intent_rejects_confident_winner_absent_from_runtime_labels():
+    # A confident winner (>= threshold, so it does not gate to rest) whose model
+    # label is missing from a runtime set that still includes rest must raise.
+    with pytest.raises(ValueError, match="not in runtime_class_labels"):
+        gate_intent(
+            [0.9, 0.1],
+            ("feet", "tongue"),
+            runtime_class_labels=("rest", "left_hand", "right_hand"),
+            rest_threshold=0.6,
         )
 
 

@@ -184,3 +184,91 @@ def test_suspiciously_small_peak_flags_possible_volt_units():
     )
 
     assert shape.suspiciously_small_peak
+
+
+@pytest.mark.parametrize("channel_count", [0, -1])
+def test_default_channel_labels_requires_at_least_one_channel(channel_count):
+    with pytest.raises(ValueError, match="at least 1"):
+        default_channel_labels(channel_count)
+
+
+def test_expected_sampling_rate_must_be_positive():
+    with pytest.raises(EegFrameContractError, match="expected_sampling_rate_hz"):
+        validate_eeg_frame_payload(
+            sampling_rate_hz=DEFAULT_EEG_SAMPLING_RATE_HZ,
+            channel_labels=default_channel_labels(),
+            samples=[1.0] * DEFAULT_EEG_CHANNEL_COUNT,
+            expected_sampling_rate_hz=0.0,
+        )
+
+
+def test_sampling_rate_tolerance_must_be_non_negative():
+    with pytest.raises(EegFrameContractError, match="non-negative"):
+        validate_eeg_frame_payload(
+            sampling_rate_hz=DEFAULT_EEG_SAMPLING_RATE_HZ,
+            channel_labels=default_channel_labels(),
+            samples=[1.0] * DEFAULT_EEG_CHANNEL_COUNT,
+            sampling_rate_tolerance_hz=-0.1,
+        )
+
+
+def test_expected_channel_count_must_be_at_least_one():
+    with pytest.raises(EegFrameContractError, match="expected_channel_count"):
+        validate_eeg_frame_payload(
+            sampling_rate_hz=DEFAULT_EEG_SAMPLING_RATE_HZ,
+            channel_labels=(),
+            samples=[1.0],
+            expected_channel_count=0,
+        )
+
+
+def test_channel_labels_reject_whitespace_only_entries():
+    labels = list(default_channel_labels())
+    labels[0] = "   "
+
+    with pytest.raises(EegFrameContractError, match="channel_labels must be non-empty"):
+        validate_eeg_frame_payload(
+            sampling_rate_hz=DEFAULT_EEG_SAMPLING_RATE_HZ,
+            channel_labels=labels,
+            samples=[1.0] * DEFAULT_EEG_CHANNEL_COUNT,
+        )
+
+
+def test_expected_channel_labels_must_be_non_empty():
+    with pytest.raises(EegFrameContractError, match="expected_channel_labels must be non-empty"):
+        validate_eeg_frame_payload(
+            sampling_rate_hz=DEFAULT_EEG_SAMPLING_RATE_HZ,
+            channel_labels=(),
+            samples=[1.0],
+            expected_channel_labels=(),
+        )
+
+
+def test_expected_channel_labels_reject_empty_entries():
+    with pytest.raises(EegFrameContractError, match="must not contain empty labels"):
+        validate_eeg_frame_payload(
+            sampling_rate_hz=DEFAULT_EEG_SAMPLING_RATE_HZ,
+            channel_labels=("c3", "cz", "c4"),
+            samples=[1.0] * 6,
+            expected_channel_labels=("c3", "  ", "c4"),
+        )
+
+
+def test_expected_channel_labels_must_be_unique():
+    with pytest.raises(EegFrameContractError, match="expected_channel_labels must be unique"):
+        validate_eeg_frame_payload(
+            sampling_rate_hz=DEFAULT_EEG_SAMPLING_RATE_HZ,
+            channel_labels=("c3", "cz", "c4"),
+            samples=[1.0] * 6,
+            expected_channel_labels=("c3", "cz", "c3"),
+        )
+
+
+def test_max_abs_sample_uv_must_be_positive():
+    with pytest.raises(EegFrameContractError, match="max_abs_sample_uv"):
+        validate_eeg_frame_payload(
+            sampling_rate_hz=DEFAULT_EEG_SAMPLING_RATE_HZ,
+            channel_labels=default_channel_labels(),
+            samples=[1.0] * DEFAULT_EEG_CHANNEL_COUNT,
+            max_abs_sample_uv=0.0,
+        )

@@ -1,13 +1,18 @@
+import copy
+
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
 from eeg_bci_pipeline.data.bciciv2a_dataset import LabeledEpochs  # noqa: E402
+from eeg_bci_pipeline.training.eegnet import EEGNet  # noqa: E402
 from eeg_bci_pipeline.training.eegnet_classifier import (  # noqa: E402
     _apply_channel_stats,
     _epochs_to_tensor,
     _fit_channel_stats,
+    _stratified_holdout,
     evaluate_eegnet_classifier,
+    train_eegnet_fold,
 )
 
 
@@ -116,4 +121,97 @@ def test_evaluate_eegnet_classifier_caps_cv_splits_to_min_class_count():
         kernel_length=32,
     )
 
-    assert evaluation.cv_splits <= 3
+    assert evaluation.cv_splits == 3
+
+
+def test_stratified_holdout_returns_whole_fold_when_too_small_to_stratify():
+    # 3 epochs across 3 distinct classes: n_total (3) < 2 * n_classes (6), so the
+    # split cannot place one sample per class on both sides and falls back to
+    # using the entire fold for both inner train and inner validation.
+    epochs = np.random.default_rng(7).normal(size=(3, 4, 64))
+    labels = np.array([0, 1, 2], dtype=np.int64)
+
+    train_uv, train_labels, val_uv, val_labels = _stratified_holdout(
+        epochs,
+        labels,
+        val_fraction=0.2,
+        random_state=0,
+    )
+
+    assert train_uv is epochs
+    assert val_uv is epochs
+    assert np.array_equal(train_labels, labels)
+    assert np.array_equal(val_labels, labels)
+
+
+def test_train_eegnet_fold_with_no_epochs_leaves_model_unchanged():
+    # n_epochs=0: the training loop never runs, so best_state stays None and the
+    # best-checkpoint restore is skipped (the model keeps its initial weights).
+    torch.manual_seed(0)
+    model = EEGNet(n_channels=4, n_samples=128, n_classes=2, kernel_length=32)
+    before = copy.deepcopy(model.state_dict())
+
+    rng = np.random.default_rng(0)
+    train_uv = rng.normal(size=(8, 4, 128))
+    train_labels = np.array([0, 1] * 4, dtype=np.int64)
+
+    train_eegnet_fold(
+        model,
+        train_uv,
+        train_labels,
+        train_uv,
+        train_labels,
+        device=torch.device("cpu"),
+        learning_rate=1e-3,
+        weight_decay=1e-2,
+        n_epochs=0,
+        batch_size=4,
+    )
+
+    after = model.state_dict()
+    for key in before:
+        assert torch.equal(before[key], after[key])
+
+
+def test_train_eegnet_fold_restores_best_checkpoint_over_many_epochs():
+    # Over several epochs the inner-val loss improves on some epochs and worsens
+    # on others; the best (lowest-loss) checkpoint is restored at the end. This
+    # exercises both the improve and the no-improve branches of the loop.
+    torch.manual_seed(0)
+    model = EEGNet(n_channels=4, n_samples=128, n_classes=2, kernel_length=32)
+
+    rng = np.random.default_rng(1)
+    train_uv = rng.normal(size=(12, 4, 128))
+    train_labels = np.array([0, 1] * 6, dtype=np.int64)
+    val_uv = rng.normal(size=(4, 4, 128))
+    val_labels = np.array([0, 1, 0, 1], dtype=np.int64)
+
+    criterion = torch.nn.CrossEntropyLoss()
+    val_x = _epochs_to_tensor(val_uv)
+    val_y = torch.from_numpy(val_labels)
+
+    val_losses = train_eegnet_fold(
+        model,
+        train_uv,
+        train_labels,
+        val_uv,
+        val_labels,
+        device=torch.device("cpu"),
+        learning_rate=5e-2,
+        weight_decay=1e-2,
+        n_epochs=20,
+        batch_size=4,
+    )
+
+    # The inner-val loss both improved and regressed across epochs, and its lowest
+    # point was not the final epoch, so restoring the best checkpoint is observable
+    # (a no-op restore would leave the higher last-epoch loss).
+    assert len(val_losses) == 20
+    assert min(val_losses) < val_losses[-1]
+
+    # The restored model reproduces exactly that lowest inner-val loss, proving the
+    # best checkpoint (not the final or an intermediate one) was loaded back.
+    model.eval()
+    with torch.no_grad():
+        restored_loss = float(criterion(model(val_x), val_y))
+    assert restored_loss == pytest.approx(min(val_losses))

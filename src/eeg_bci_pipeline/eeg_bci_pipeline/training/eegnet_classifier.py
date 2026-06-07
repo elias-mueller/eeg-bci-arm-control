@@ -27,7 +27,7 @@ try:
     import torch
     import torch.nn as nn
     from torch.utils.data import DataLoader, TensorDataset
-except ImportError as _err:
+except ImportError as _err:  # pragma: no cover
     raise RuntimeError("EEGNet classifier requires PyTorch. Install: pip install torch") from _err
 
 from eeg_bci_pipeline.training.eegnet import EEGNet
@@ -148,7 +148,7 @@ def train_eegnet_fold(
     weight_decay: float,
     n_epochs: int,
     batch_size: int,
-) -> None:
+) -> list[float]:
     """Train ``model`` for ``n_epochs`` and restore its best checkpoint.
 
     The lowest-validation-loss checkpoint (on an inner split of the training
@@ -156,6 +156,9 @@ def train_eegnet_fold(
     accuracy stays unbiased. Training runs the full schedule with no early stop:
     on small folds the inner-val loss often worsens for tens of epochs before
     recovering, so stopping early restored a near-random checkpoint.
+
+    Returns the per-epoch inner-validation losses (the minimum is the restored
+    checkpoint's loss), so callers and tests can see the training trajectory.
     """
 
     train_x = _epochs_to_tensor(train_epochs_uv).to(device)
@@ -174,6 +177,7 @@ def train_eegnet_fold(
 
     best_val_loss = float("inf")
     best_state: dict[str, Any] | None = None
+    val_losses: list[float] = []
 
     for _epoch in range(n_epochs):
         model.train()
@@ -186,6 +190,7 @@ def train_eegnet_fold(
         model.eval()
         with torch.no_grad():
             val_loss = float(criterion(model(val_x), val_y))
+        val_losses.append(val_loss)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -193,6 +198,7 @@ def train_eegnet_fold(
 
     if best_state is not None:
         model.load_state_dict(best_state)
+    return val_losses
 
 
 def _fit_channel_stats(epochs_uv: FloatArray) -> tuple[FloatArray, FloatArray]:

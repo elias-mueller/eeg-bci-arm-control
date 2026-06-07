@@ -177,65 +177,11 @@ def test_build_trial_schedule_supports_more_than_two_classes():
         assert schedule.count(label) == 3
 
 
-def test_cli_trains_from_captured_epochs(tmp_path):
-    # The central seam: calibration saves a LabeledEpochs joblib; the CLI loads it
-    # (non-.gdf path) and trains a saveable artifact.
-    from eeg_bci_pipeline.training.hand_classifier import load_hand_classifier_artifact
-    from eeg_bci_pipeline.training.hand_classifier_cli import main
-
-    rng = np.random.default_rng(3)
-    records = [
-        ("left_hand" if i % 2 == 0 else "right_hand", rng.standard_normal((8, 750)) * 20.0)
-        for i in range(8)
-    ]
-    epochs = assemble_labeled_epochs(
-        source_id="cli-test",
-        sampling_rate_hz=250.0,
-        channel_labels=tuple(f"EEG-{i:02d}" for i in range(8)),
-        class_labels=("left_hand", "right_hand"),
-        records=records,
-    )
-    epochs_path = tmp_path / "cap.joblib"
-    save_labeled_epochs(epochs, epochs_path)
-    model_path = tmp_path / "model.joblib"
-
-    exit_code = main([str(epochs_path), "--save-model", str(model_path), "--cv-splits", "2"])
-
-    assert exit_code == 0
-    artifact = load_hand_classifier_artifact(model_path)
-    assert artifact.channel_count == 8
-    assert artifact.samples_per_epoch == 750
-    # Captured epochs carry no GDF tmin/tmax window; the CLI must stamp None.
-    assert artifact.epoch_tmin_sec is None
-    assert artifact.epoch_tmax_sec is None
-
-
-def test_cli_saves_model_when_cv_too_small(tmp_path):
-    # 2 epochs/class: enough to train (>=1/class) but not for cross-validation, so
-    # --save-model must skip CV and still write the model.
-    from eeg_bci_pipeline.training.hand_classifier import load_hand_classifier_artifact
-    from eeg_bci_pipeline.training.hand_classifier_cli import main
-
-    rng = np.random.default_rng(5)
-    records = [
-        ("left_hand" if i % 2 == 0 else "right_hand", rng.standard_normal((8, 750)) * 20.0)
-        for i in range(4)
-    ]
-    epochs = assemble_labeled_epochs(
-        source_id="cli-skip",
-        sampling_rate_hz=250.0,
-        channel_labels=tuple(f"EEG-{i:02d}" for i in range(8)),
-        class_labels=("left_hand", "right_hand"),
-        records=records,
-    )
-    epochs_path = tmp_path / "tiny.joblib"
-    save_labeled_epochs(epochs, epochs_path)
-    model_path = tmp_path / "model.joblib"
-
-    exit_code = main([str(epochs_path), "--save-model", str(model_path)])
-
-    assert exit_code == 0
-    assert load_hand_classifier_artifact(model_path).channel_count == 8
+def test_reshape_frame_to_channel_major_rejects_nonpositive_channel_count():
+    with pytest.raises(ValueError, match="channel_count must be at least 1"):
+        reshape_frame_to_channel_major([1.0, 2.0], 0)
+    with pytest.raises(ValueError, match="channel_count must be at least 1"):
+        reshape_frame_to_channel_major([1.0, 2.0], -1)
 
 
 def test_assemble_labeled_epochs_rejects_unknown_label():

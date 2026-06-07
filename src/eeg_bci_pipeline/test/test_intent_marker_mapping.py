@@ -32,3 +32,11 @@ def test_unknown_intent_gets_fallback_style():
 
     assert style.label == "blink"
     assert style.length == pytest.approx(0.35)
+
+
+def test_whitespace_only_intent_falls_back_to_unknown_label():
+    style = style_for_intent("   ", 0.5)
+
+    assert style.label == "unknown"
+    assert style.length == pytest.approx(0.35)
+    assert style.color_rgba[3] == pytest.approx(0.5)
