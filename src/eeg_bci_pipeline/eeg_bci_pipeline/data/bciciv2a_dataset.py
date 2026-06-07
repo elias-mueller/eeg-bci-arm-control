@@ -62,7 +62,7 @@ def read_bciciv2a_epochs(
 
     try:
         import mne
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError(
             "BCIC IV 2a epoch extraction requires MNE. Install: python3-mne"
         ) from error
@@ -173,7 +173,7 @@ class JoblibLike(Protocol):
 def _joblib() -> JoblibLike:
     try:
         return cast(JoblibLike, importlib.import_module("joblib"))
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError(
             "Saving or loading labeled epochs requires joblib. Install: python3-joblib"
         ) from error

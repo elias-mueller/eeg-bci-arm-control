@@ -156,7 +156,7 @@ class MockIntentDecoder(Node):
         return tuple(str(label).strip() for label in labels)
 
 
-def main(args: list[str] | None = None) -> None:
+def main(args: list[str] | None = None) -> None:  # pragma: no cover
     rclpy.init(args=args)
     node = MockIntentDecoder()
     try:

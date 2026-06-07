@@ -183,7 +183,7 @@ class ModelIntentDecoder(Node):
             )
 
 
-def main(args: list[str] | None = None) -> None:
+def main(args: list[str] | None = None) -> None:  # pragma: no cover
     rclpy.init(args=args)
     node = None
     try:

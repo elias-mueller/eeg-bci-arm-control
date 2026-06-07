@@ -161,7 +161,7 @@ def train_hand_classifier(
 
     try:
         from mne import use_log_level
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError(
             "Hand classifier training requires MNE and scikit-learn. "
             "Install: python3-mne python3-sklearn"
@@ -302,7 +302,7 @@ def evaluate_hand_classifier(
 
     try:
         from mne import use_log_level
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError(
             "Hand classifier evaluation requires MNE and scikit-learn. "
             "Install: python3-mne python3-sklearn"
@@ -361,7 +361,7 @@ def cross_validate_folds(
 
     try:
         from sklearn.model_selection import StratifiedKFold
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError(
             "Cross-validation requires scikit-learn. Install: python3-sklearn"
         ) from error
@@ -411,7 +411,7 @@ def build_csp_lda_pipeline(*, csp_components: int = DEFAULT_CSP_COMPONENTS) -> o
     try:
         from mne.decoding import CSP
         from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError(
             "Hand classifier evaluation requires MNE and scikit-learn. "
             "Install: python3-mne python3-sklearn"
@@ -530,7 +530,7 @@ def _make_pipeline() -> PipelineFactory:
 def _filter_data() -> FilterData:
     try:
         filter_module = importlib.import_module("mne.filter")
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError("Bandpass filtering requires MNE. Install: python3-mne") from error
 
     return cast(FilterData, getattr(filter_module, "filter_data"))
@@ -539,5 +539,5 @@ def _filter_data() -> FilterData:
 def _joblib() -> JoblibLike:
     try:
         return cast(JoblibLike, importlib.import_module("joblib"))
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError("Model persistence requires joblib. Install: python3-joblib") from error

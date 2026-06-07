@@ -167,7 +167,7 @@ def import_pylsl() -> Any:
 
     try:
         import pylsl  # pyright: ignore[reportMissingImports]
-    except Exception as error:
+    except Exception as error:  # pragma: no cover
         raise RuntimeError(
             "LSL support requires pylsl and the native liblsl library. "
             "Set up the environment with scripts/setup-python-env."

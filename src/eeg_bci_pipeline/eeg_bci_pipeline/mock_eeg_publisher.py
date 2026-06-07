@@ -90,7 +90,7 @@ class MockEegPublisher(Node):
         return samples
 
 
-def main(args: list[str] | None = None) -> None:
+def main(args: list[str] | None = None) -> None:  # pragma: no cover
     rclpy.init(args=args)
     node = MockEegPublisher()
     try:

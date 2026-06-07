@@ -5,7 +5,7 @@ from __future__ import annotations
 try:
     import torch
     import torch.nn as nn
-except ImportError as _err:
+except ImportError as _err:  # pragma: no cover
     raise RuntimeError("EEGNet requires PyTorch. Install: pip install torch") from _err
 
 

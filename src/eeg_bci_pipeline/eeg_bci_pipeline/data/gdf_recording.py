@@ -54,7 +54,7 @@ def read_gdf_recording(
 
     try:
         import mne
-    except ImportError as error:
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError(
             "GDF replay requires MNE. Install the Ubuntu package: python3-mne"
         ) from error
@@ -79,7 +79,7 @@ def recording_from_mne_raw(
             selected_labels = _eeg_channel_labels(raw)
     else:
         selected_labels = _eeg_channel_labels(raw)
-    if not selected_labels:
+    if not selected_labels:  # pragma: no cover - unreachable: _eeg_channel_labels raises first
         raise ValueError("recording must contain at least one EEG channel")
 
     data_volts = raw.get_data(picks=list(selected_labels))
