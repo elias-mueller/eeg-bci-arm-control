@@ -17,6 +17,7 @@ subset of pylsl's API used here, mirroring ``MneRawLike`` in
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Protocol, Sequence
 
@@ -218,6 +219,11 @@ class LslStreamMetadata:
     # duplicated, or wrong count) and ch_NN fallbacks were substituted. A label
     # strict decoder will reject such frames, so the node warns on this.
     labels_downgraded: bool
+    # Per-channel declared LSL type (e.g. "EEG"), document order, length
+    # channel_count ("" where a channel declared none). Lets the node forward only
+    # a subset (e.g. type="EEG") of a stream that also carries contact /
+    # accelerometer / battery channels, as the BrainAccess MIDI does.
+    channel_types: tuple[str, ...] = ()
 
 
 def extract_lsl_metadata(
@@ -239,11 +245,16 @@ def extract_lsl_metadata(
         raise ValueError("LSL stream must declare at least one channel")
 
     source_id = info.source_id() or info.name() or fallback_source_id
-    declared_labels, declared_unit = _read_channel_desc(info.desc(), channel_count)
+    declared_labels, declared_types, declared_unit = _read_channel_desc(info.desc(), channel_count)
     channel_labels = resolve_channel_labels(declared_labels, channel_count)
     declared_present = any(label.strip() for label in declared_labels)
     labels_downgraded = declared_present and channel_labels == default_channel_labels(
         channel_count
+    )
+    # Pad to channel_count so the types align to sample columns even when the desc
+    # declares fewer <channel> nodes than the stream advertises.
+    channel_types = tuple(declared_types[:channel_count]) + ("",) * (
+        channel_count - len(declared_types)
     )
     return LslStreamMetadata(
         source_id=source_id,
@@ -254,31 +265,35 @@ def extract_lsl_metadata(
         channel_labels=channel_labels,
         declared_unit=declared_unit,
         labels_downgraded=labels_downgraded,
+        channel_types=channel_types,
     )
 
 
 def _read_channel_desc(
     desc: LslXmlElementLike,
     channel_count: int,
-) -> tuple[list[str], str]:
-    """Walk ``desc/channels/channel`` in document order for labels and a unit.
+) -> tuple[list[str], list[str], str]:
+    """Walk ``desc/channels/channel`` in document order for labels, types, and a unit.
 
     Single-unit assumption: the first non-empty channel unit is taken as the whole
     stream's unit. Heterogeneous per-channel units (rare for an EEG stream) are not
-    modeled; every channel is scaled by that one unit.
+    modeled; every channel is scaled by that one unit. Per-channel ``type`` is kept
+    individually so the node can select a subset (e.g. only ``type="EEG"``).
     """
 
     labels: list[str] = []
+    types: list[str] = []
     declared_unit = ""
     node = desc.child("channels").child("channel")
     while not node.empty() and len(labels) < channel_count:
         labels.append(node.child_value("label"))
+        types.append(node.child_value("type"))
         if not declared_unit:
             unit = node.child_value("unit").strip().lower()
             if unit:
                 declared_unit = unit
         node = node.next_sibling()
-    return labels, declared_unit
+    return labels, types, declared_unit
 
 
 def resolve_channel_labels(
@@ -305,6 +320,27 @@ def resolve_channel_labels(
     return default_channel_labels(channel_count)
 
 
+def select_channel_indices(channel_types: Sequence[str], select_type: str) -> tuple[int, ...]:
+    """Return the indices of channels whose declared type equals ``select_type``.
+
+    Case-insensitive, document order. Lets the node forward only e.g. the
+    ``type="EEG"`` channels of a stream that also carries contact / accelerometer /
+    battery channels (the BrainAccess MIDI publishes all of them in one outlet).
+    Raises if ``select_type`` is empty or no channel matches, so a misconfigured
+    selection fails fast at launch instead of yielding a zero-width frame.
+    """
+
+    target = select_type.strip().lower()
+    if not target:
+        raise ValueError("select_type must be non-empty")
+    indices = tuple(
+        index for index, ctype in enumerate(channel_types) if ctype.strip().lower() == target
+    )
+    if not indices:
+        raise ValueError(f"no channels with declared type '{select_type}'")
+    return indices
+
+
 def unit_scale_for(declared_unit: str, default_scale: float = 1.0) -> float:
     """Return the raw-to-microvolt multiplier for a declared LSL unit.
 
@@ -326,13 +362,18 @@ def chunk_to_channel_major_uv(
     channel_count: int,
     *,
     unit_scale: float = 1.0,
+    keep_indices: Sequence[int] | None = None,
 ) -> list[float]:
     """Convert an LSL ``pull_chunk`` result to channel-major microvolt samples.
 
-    ``sample_major_chunk`` is ``[n_samples][n_channels]`` (LSL's layout); the
+    ``sample_major_chunk`` is ``[n_samples][n_channels]`` (LSL's layout) where
+    ``n_channels`` is ``channel_count`` (the full stream width, validated); the
     result is the flat channel-major ``[ch0_s0, ch0_s1, ..., ch1_s0, ...]`` list
-    that ``EegFrame.samples`` requires, scaled by ``unit_scale``. An empty chunk
-    yields ``[]``; a chunk whose per-sample width is not ``channel_count`` raises.
+    that ``EegFrame.samples`` requires, scaled by ``unit_scale``. When
+    ``keep_indices`` is given, only those channel columns are forwarded (in the
+    given order), so a stream carrying non-EEG channels can be subset down. An
+    empty chunk yields ``[]``; a chunk whose per-sample width is not
+    ``channel_count`` raises.
     """
 
     if channel_count < 1:
@@ -346,6 +387,8 @@ def chunk_to_channel_major_uv(
             f"chunk must be sample-major with {channel_count} channels per sample, "
             f"got array of shape {data.shape}"
         )
+    if keep_indices is not None:
+        data = data[:, list(keep_indices)]
     channel_major = np.ascontiguousarray(data.T) * unit_scale
     return channel_major.reshape(-1).tolist()
 
@@ -374,3 +417,85 @@ def channel_major_to_sample_major(
     data = np.asarray(channel_major_flat, dtype=np.float64)
     sample_major = data.reshape(channel_count, -1).T
     return sample_major.tolist()
+
+
+@dataclass
+class CausalDcBlocker:
+    """Stateful one-pole high-pass (DC blocker) for channel-major microvolt frames.
+
+    Dry-electrode EEG (e.g. the BrainAccess MIDI over LSL) rides on a large, slowly
+    varying electrode DC offset, hundreds of millivolts, far above the EegFrame
+    amplitude contract, even though the neural AC content is a healthy ~100 uV. This
+    strips that pedestal causally (no look-ahead, so it is valid for real-time and
+    shareable with the embedded front-end) with the classic one-pole DC blocker::
+
+        y[n] = x[n] - x[n-1] + pole * y[n-1],   pole = exp(-2*pi*fc/fs)
+
+    a transfer-function zero at DC and a pole near the unit circle: the response is
+    ~0 at DC and ~unity through the mu/beta band, so a 0.5 Hz cutoff removes the
+    offset without touching motor rhythms. State (previous input and output per
+    channel) persists across chunks so the filter is continuous over the stream. On
+    the first chunk it lazily anchors ``x[-1]`` to each channel's first sample
+    (``y[-1] = 0``), so a constant pedestal yields ~0 output from the very first
+    sample rather than a one-sample full-amplitude transient that would trip the
+    contract at launch. :meth:`reset` re-arms it after a stream drop.
+
+    Pure NumPy (channel-vectorized over a short per-chunk time loop) so the node's
+    DSP is unit-testable without ROS or LSL.
+    """
+
+    cutoff_hz: float
+    sampling_rate_hz: float
+    channel_count: int
+    _pole: float = field(default=0.0, init=False, repr=False)
+    _x_prev: Any = field(default=None, init=False, repr=False)
+    _y_prev: Any = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.cutoff_hz <= 0.0:
+            raise ValueError("cutoff_hz must be greater than 0")
+        if self.sampling_rate_hz <= 0.0:
+            raise ValueError("sampling_rate_hz must be greater than 0")
+        if self.channel_count < 1:
+            raise ValueError("channel_count must be at least 1")
+        self._pole = math.exp(-2.0 * math.pi * self.cutoff_hz / self.sampling_rate_hz)
+
+    def reset(self) -> None:
+        """Drop the filter state so the next chunk re-anchors (after a stream drop)."""
+
+        self._x_prev = None
+        self._y_prev = None
+
+    def process(self, channel_major_flat: Sequence[float]) -> list[float]:
+        """High-pass a flat channel-major frame, carrying filter state across calls.
+
+        Input/output layout matches :func:`chunk_to_channel_major_uv`
+        (``[ch0_s0, ch0_s1, ..., ch1_s0, ...]``). An empty frame yields ``[]``; a
+        length not divisible by ``channel_count`` raises.
+        """
+
+        length = len(channel_major_flat)
+        if length == 0:
+            return []
+        if length % self.channel_count != 0:
+            raise ValueError(
+                f"channel-major length {length} is not divisible by "
+                f"channel_count {self.channel_count}"
+            )
+        data = np.asarray(channel_major_flat, dtype=np.float64).reshape(self.channel_count, -1)
+        if self._x_prev is None:
+            self._x_prev = data[:, 0].copy()
+            self._y_prev = np.zeros(self.channel_count, dtype=np.float64)
+        x_prev = self._x_prev
+        y_prev = self._y_prev
+        pole = self._pole
+        out = np.empty_like(data)
+        for index in range(data.shape[1]):
+            x_t = data[:, index]
+            y_t = x_t - x_prev + pole * y_prev
+            out[:, index] = y_t
+            x_prev = x_t
+            y_prev = y_t
+        self._x_prev = np.asarray(x_prev).copy()
+        self._y_prev = np.asarray(y_prev).copy()
+        return out.reshape(-1).tolist()

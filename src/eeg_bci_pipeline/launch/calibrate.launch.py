@@ -34,6 +34,8 @@ def generate_launch_description() -> LaunchDescription:
     stream_name = LaunchConfiguration("stream_name")
     stream_type = LaunchConfiguration("stream_type")
     scale_to_microvolts = LaunchConfiguration("scale_to_microvolts")
+    select_channel_type = LaunchConfiguration("select_channel_type")
+    highpass_hz = LaunchConfiguration("highpass_hz")
     expected_channel_count = LaunchConfiguration("expected_channel_count")
     source_id = LaunchConfiguration("source_id")
     start_test_outlet = LaunchConfiguration("start_test_outlet")
@@ -54,7 +56,14 @@ def generate_launch_description() -> LaunchDescription:
             # 1.0: the test outlet (and a unit-declaring headset) emit microvolts. Set
             # 1000000.0 for a headset that streams volts with no declared LSL unit.
             DeclareLaunchArgument("scale_to_microvolts", default_value="1.0"),
-            # 0 accepts any channel count (the headset's montage); set e.g. 16 to guard.
+            # Empty keeps every channel. A BrainAccess headset sets "EEG" to drop its
+            # contact / accelerometer / battery channels down to the EEG montage.
+            DeclareLaunchArgument("select_channel_type", default_value=""),
+            # 0 disables the DC blocker. A dry headset sets ~0.5 to strip the
+            # electrode offset before the amplitude contract / epoch capture.
+            DeclareLaunchArgument("highpass_hz", default_value="0.0"),
+            # 0 accepts any channel count; with select_channel_type:=EEG set e.g. 16
+            # to guard the *selected* EEG count (the headset's motor montage).
             DeclareLaunchArgument("expected_channel_count", default_value="0"),
             DeclareLaunchArgument("source_id", default_value="calibration"),
             # Default off: a real session streams the headset. Set true for a no-headset test.
@@ -93,6 +102,8 @@ def generate_launch_description() -> LaunchDescription:
                         "scale_to_microvolts": ParameterValue(
                             scale_to_microvolts, value_type=float
                         ),
+                        "select_channel_type": select_channel_type,
+                        "highpass_hz": ParameterValue(highpass_hz, value_type=float),
                         "expected_channel_count": ParameterValue(
                             expected_channel_count, value_type=int
                         ),

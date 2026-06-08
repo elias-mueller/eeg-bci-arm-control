@@ -1,6 +1,7 @@
 import pytest
 from eeg_bci_pipeline.data.gdf_recording import VOLTS_TO_MICROVOLTS
 from eeg_bci_pipeline.lsl_bridge import (
+    CausalDcBlocker,
     LslClockAligner,
     build_resolve_predicate,
     channel_major_to_sample_major,
@@ -8,6 +9,7 @@ from eeg_bci_pipeline.lsl_bridge import (
     extract_lsl_metadata,
     import_pylsl,
     resolve_channel_labels,
+    select_channel_indices,
     unit_scale_for,
 )
 
@@ -66,11 +68,15 @@ _EMPTY_XML = FakeXml(empty=True)
 
 
 def _make_desc(channels):
-    """Build a desc tree from [(label, unit), ...], linking channel siblings."""
+    """Build a desc tree from [(label, unit[, type]), ...], linking channel siblings."""
 
     node = None
-    for label, unit in reversed(channels):
-        node = FakeXml(values={"label": label, "unit": unit}, nxt=node)
+    for entry in reversed(channels):
+        label, unit = entry[0], entry[1]
+        values = {"label": label, "unit": unit}
+        if len(entry) > 2 and entry[2]:
+            values["type"] = entry[2]
+        node = FakeXml(values=values, nxt=node)
     channels_el = FakeXml(children={"channel": node} if node is not None else {})
     return FakeXml(children={"channels": channels_el})
 
@@ -476,3 +482,121 @@ def test_extract_lsl_metadata_skips_empty_unit_and_keeps_first_declared():
 
     assert meta.channel_labels == ("C3", "Cz")
     assert meta.declared_unit == "volts"
+
+
+# --- per-channel types -------------------------------------------------------
+
+
+def test_extract_lsl_metadata_reads_per_channel_types():
+    # The BrainAccess MIDI bundles EEG, contact, and battery channels in one outlet;
+    # the per-channel type is what lets the node forward only the EEG ones.
+    info = FakeStreamInfo(
+        channel_count=3,
+        channels=[
+            ("C3", "uV", "EEG"),
+            ("contact_C3", "value", "contact"),
+            ("Battery", "pct", "Battery"),
+        ],
+    )
+
+    meta = extract_lsl_metadata(info)
+
+    assert meta.channel_types == ("EEG", "contact", "Battery")
+
+
+def test_extract_lsl_metadata_pads_types_to_channel_count_when_desc_short():
+    # Fewer <channel> nodes than channel_count -> types padded with "" so they stay
+    # index-aligned to the sample columns even though labels also downgrade.
+    info = FakeStreamInfo(channel_count=3, channels=[("C3", "uV", "EEG")])
+
+    meta = extract_lsl_metadata(info)
+
+    assert meta.channel_types == ("EEG", "", "")
+
+
+def test_extract_lsl_metadata_types_default_empty_when_undeclared():
+    # A stream that declares labels but no types yields all-"" types (length n).
+    info = FakeStreamInfo(channel_count=2, channels=[("C3", "uV"), ("Cz", "uV")])
+
+    assert extract_lsl_metadata(info).channel_types == ("", "")
+
+
+# --- select_channel_indices --------------------------------------------------
+
+
+def test_select_channel_indices_matches_type_case_insensitively():
+    types = ("EEG", "contact", "eeg", "Accel")
+
+    assert select_channel_indices(types, "EEG") == (0, 2)
+    assert select_channel_indices(types, " eeg ") == (0, 2)
+
+
+def test_select_channel_indices_rejects_empty_select_type():
+    with pytest.raises(ValueError, match="must be non-empty"):
+        select_channel_indices(("EEG",), "  ")
+
+
+def test_select_channel_indices_raises_when_no_channel_matches():
+    # A select type that matches nothing fails fast rather than yielding a 0-width frame.
+    with pytest.raises(ValueError, match="no channels with declared type"):
+        select_channel_indices(("EEG", "Accel"), "EMG")
+
+
+def test_chunk_to_channel_major_uv_selects_keep_indices():
+    # 2 samples x 4 channels; keep columns 0 and 2 -> channel-major of just those.
+    chunk = [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]
+
+    assert chunk_to_channel_major_uv(chunk, 4, keep_indices=[0, 2]) == pytest.approx(
+        [1.0, 5.0, 3.0, 7.0]
+    )
+
+
+# --- CausalDcBlocker ---------------------------------------------------------
+
+
+def test_causal_dc_blocker_rejects_invalid_params():
+    with pytest.raises(ValueError, match="cutoff_hz"):
+        CausalDcBlocker(cutoff_hz=0.0, sampling_rate_hz=250.0, channel_count=1)
+    with pytest.raises(ValueError, match="sampling_rate_hz"):
+        CausalDcBlocker(cutoff_hz=0.5, sampling_rate_hz=0.0, channel_count=1)
+    with pytest.raises(ValueError, match="channel_count"):
+        CausalDcBlocker(cutoff_hz=0.5, sampling_rate_hz=250.0, channel_count=0)
+
+
+def test_causal_dc_blocker_empty_and_ragged_input():
+    blocker = CausalDcBlocker(cutoff_hz=0.5, sampling_rate_hz=250.0, channel_count=2)
+
+    assert blocker.process([]) == []
+    with pytest.raises(ValueError, match="not divisible"):
+        blocker.process([1.0, 2.0, 3.0])
+
+
+def test_causal_dc_blocker_removes_constant_offset_from_first_sample():
+    # A constant DC pedestal yields ~0 output from the very first sample (lazy anchor),
+    # so a 200 mV offset never trips the amplitude contract at launch.
+    blocker = CausalDcBlocker(cutoff_hz=0.5, sampling_rate_hz=250.0, channel_count=1)
+
+    assert blocker.process([200000.0] * 5) == pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0])
+
+
+def test_causal_dc_blocker_passes_ac_and_persists_state_across_chunks():
+    # The AC content survives (a ~100 uV step) while the huge DC is gone, and state
+    # carries across calls so there is no re-init transient on the second chunk.
+    blocker = CausalDcBlocker(cutoff_hz=0.5, sampling_rate_hz=250.0, channel_count=1)
+
+    first = blocker.process([100000.0, 100100.0])
+    assert blocker._x_prev is not None  # state retained for continuity
+    assert max(abs(value) for value in first) < 1000.0  # DC gone, only the ~100 step
+
+    second = blocker.process([100000.0, 100000.0])
+    assert max(abs(value) for value in second) < 1000.0
+
+
+def test_causal_dc_blocker_reset_reanchors():
+    blocker = CausalDcBlocker(cutoff_hz=0.5, sampling_rate_hz=250.0, channel_count=1)
+    blocker.process([5000.0, 5000.0])
+
+    blocker.reset()
+    assert blocker._x_prev is None
+    # After reset the next chunk re-anchors to its own first sample (output starts ~0).
+    assert blocker.process([8000.0, 8000.0]) == pytest.approx([0.0, 0.0])

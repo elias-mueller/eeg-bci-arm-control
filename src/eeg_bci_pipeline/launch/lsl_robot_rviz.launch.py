@@ -50,6 +50,8 @@ def generate_launch_description() -> LaunchDescription:
     expected_channel_count = LaunchConfiguration("expected_channel_count")
     expected_sampling_rate_hz = LaunchConfiguration("expected_sampling_rate_hz")
     scale_to_microvolts = LaunchConfiguration("scale_to_microvolts")
+    select_channel_type = LaunchConfiguration("select_channel_type")
+    highpass_hz = LaunchConfiguration("highpass_hz")
     rest_confidence_threshold = LaunchConfiguration("rest_confidence_threshold")
     confidence_threshold = LaunchConfiguration("confidence_threshold")
 
@@ -68,6 +70,12 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("expected_sampling_rate_hz", default_value="250.0"),
             # 1.0: the test outlet emits microvolts. A volts headset sets 1000000.0.
             DeclareLaunchArgument("scale_to_microvolts", default_value="1.0"),
+            # Empty keeps every channel (the 22-ch test outlet). A BrainAccess headset
+            # sets "EEG" to drop its contact / accelerometer / battery channels.
+            DeclareLaunchArgument("select_channel_type", default_value=""),
+            # 0 disables the DC blocker (the test outlet is already clean). A dry
+            # headset sets ~0.5 to strip the electrode offset before the contract.
+            DeclareLaunchArgument("highpass_hz", default_value="0.0"),
             DeclareLaunchArgument("rest_confidence_threshold", default_value="0.6"),
             # Keep the driver gate <= the decoder's rest gate so confident hand
             # intents are not dropped before they reach the joint driver.
@@ -113,6 +121,8 @@ def generate_launch_description() -> LaunchDescription:
                         "scale_to_microvolts": ParameterValue(
                             scale_to_microvolts, value_type=float
                         ),
+                        "select_channel_type": select_channel_type,
+                        "highpass_hz": ParameterValue(highpass_hz, value_type=float),
                     }
                 ],
                 output="screen",

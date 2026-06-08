@@ -29,11 +29,13 @@ from eeg_bci_pipeline.eeg_frame_contract import (
 )
 from eeg_bci_pipeline.lsl_bridge import (
     DEFAULT_RESYNC_THRESHOLD_SEC,
+    CausalDcBlocker,
     LslClockAligner,
     build_resolve_predicate,
     chunk_to_channel_major_uv,
     extract_lsl_metadata,
     import_pylsl,
+    select_channel_indices,
     unit_scale_for,
 )
 from eeg_bci_pipeline.node_params import bool_param, float_param, int_param, str_param
@@ -66,6 +68,13 @@ class LslEegBridge(Node):
         self.declare_parameter("expected_sampling_rate_hz", 0.0)
         self.declare_parameter("sampling_rate_tolerance_hz", DEFAULT_SAMPLING_RATE_TOLERANCE_HZ)
         self.declare_parameter("max_abs_sample_uv", DEFAULT_MAX_ABS_SAMPLE_UV)
+        # Forward only channels whose LSL type matches (e.g. "EEG") when set; ""
+        # keeps every channel. Lets a BrainAccess stream that bundles contact /
+        # accelerometer / battery channels be subset down to the EEG montage.
+        self.declare_parameter("select_channel_type", "")
+        # Causal DC-block / high-pass cutoff (Hz) applied before the contract; 0
+        # disables it. ~0.5 centers a dry-electrode offset without touching mu/beta.
+        self.declare_parameter("highpass_hz", 0.0)
         self.declare_parameter("use_lsl_timestamps", True)
         self.declare_parameter("resync_threshold_sec", DEFAULT_RESYNC_THRESHOLD_SEC)
         self.declare_parameter("reconnect", True)
@@ -82,6 +91,8 @@ class LslEegBridge(Node):
         self._expected_sampling_rate_hz = float_param(self, "expected_sampling_rate_hz")
         self._sampling_rate_tolerance_hz = float_param(self, "sampling_rate_tolerance_hz")
         self._max_abs_sample_uv = float_param(self, "max_abs_sample_uv")
+        self._select_channel_type = str_param(self, "select_channel_type")
+        self._highpass_hz = float_param(self, "highpass_hz")
         self._use_lsl_timestamps = bool_param(self, "use_lsl_timestamps")
         self._reconnect = bool_param(self, "reconnect")
         topic = str_param(self, "topic")
@@ -96,6 +107,7 @@ class LslEegBridge(Node):
         pylsl = import_pylsl()
         info = self._resolve_stream(pylsl)
         self._apply_metadata(extract_lsl_metadata(info))
+        self._highpass = self._build_highpass()
 
         self._publisher = self.create_publisher(EegFrame, topic, qos_profile_sensor_data)
         self._validate_first_frame()
@@ -126,14 +138,35 @@ class LslEegBridge(Node):
         return build_resolve_predicate(self._stream_name, self._stream_type)
 
     def _apply_metadata(self, meta) -> None:
-        if self._expected_channel_count > 0 and meta.channel_count != self._expected_channel_count:
+        rate = self._resolve_rate(meta.nominal_srate_hz)
+        # The full stream width: chunks arrive at this width and are subset after.
+        self._source_channel_count = meta.channel_count
+
+        labels = list(meta.channel_labels)
+        if self._select_channel_type:
+            self._keep_indices = select_channel_indices(
+                meta.channel_types, self._select_channel_type
+            )
+            labels = [labels[index] for index in self._keep_indices]
+            self.get_logger().info(
+                f"Selecting {len(labels)} '{self._select_channel_type}' channel(s) of "
+                f"{meta.channel_count} from the stream"
+            )
+        else:
+            self._keep_indices = None
+
+        # expected_channel_count validates the count the pipeline will see: the
+        # selected subset when selecting by type, else the raw stream width.
+        if self._expected_channel_count > 0 and len(labels) != self._expected_channel_count:
+            selected = (
+                f" (after selecting '{self._select_channel_type}')" if self._keep_indices else ""
+            )
             raise RuntimeError(
-                f"LSL stream has {meta.channel_count} channels, "
+                f"LSL stream has {len(labels)} channels{selected}, "
                 f"expected {self._expected_channel_count}"
             )
-        rate = self._resolve_rate(meta.nominal_srate_hz)
 
-        self._channel_labels = list(meta.channel_labels)
+        self._channel_labels = labels
         self._sampling_rate_hz = rate
         self._unit_scale = unit_scale_for(meta.declared_unit, self._scale_to_microvolts)
         self._source_id = self._source_id_param or meta.source_id
@@ -144,9 +177,21 @@ class LslEegBridge(Node):
                 "labels instead. A label-strict decoder will reject these frames."
             )
         self.get_logger().info(
-            f"Bridging {meta.channel_count} ch at {rate:g} Hz to EegFrame; "
+            f"Bridging {len(self._channel_labels)} ch at {rate:g} Hz to EegFrame; "
             f"unit_scale={self._unit_scale:g} (declared unit "
             f"'{meta.declared_unit or 'unspecified'}'), source_id='{self._source_id}'"
+        )
+
+    def _build_highpass(self) -> CausalDcBlocker | None:
+        # A causal DC blocker centers a large electrode offset (dry headsets ride on
+        # hundreds of mV) before the amplitude contract; off by default (0 Hz) so the
+        # existing clean-signal replays stay byte-for-byte unchanged.
+        if self._highpass_hz <= 0.0:
+            return None
+        return CausalDcBlocker(
+            cutoff_hz=self._highpass_hz,
+            sampling_rate_hz=self._sampling_rate_hz,
+            channel_count=len(self._channel_labels),
         )
 
     def _resolve_rate(self, nominal_srate_hz: float) -> float:
@@ -187,9 +232,7 @@ class LslEegBridge(Node):
                 "No samples received while priming; validating on the first live frame instead"
             )
             return
-        samples = chunk_to_channel_major_uv(
-            chunk, len(self._channel_labels), unit_scale=self._unit_scale
-        )
+        samples = self._samples_from_chunk(chunk)
         self._validate_payload(samples)
         peak = max((abs(value) for value in samples), default=0.0)
         self.get_logger().info(
@@ -211,9 +254,7 @@ class LslEegBridge(Node):
         # reconnect to a different stream) raises ValueError, which would otherwise
         # escape the timer callback and tear the node down.
         try:
-            samples = chunk_to_channel_major_uv(
-                chunk, len(self._channel_labels), unit_scale=self._unit_scale
-            )
+            samples = self._samples_from_chunk(chunk)
         except ValueError as error:
             self._note_dropped_frame(f"malformed chunk: {error}")
             return
@@ -221,6 +262,19 @@ class LslEegBridge(Node):
             return
         stamp = self._stamp_for_chunk(timestamps)
         self._publish(samples, stamp)
+
+    def _samples_from_chunk(self, chunk) -> list[float]:
+        # Shared sample pipeline for the prime and steady-state paths: subset to the
+        # selected channels (if any), scale to microvolts, then DC-block (if enabled).
+        samples = chunk_to_channel_major_uv(
+            chunk,
+            self._source_channel_count,
+            unit_scale=self._unit_scale,
+            keep_indices=self._keep_indices,
+        )
+        if self._highpass is not None:
+            samples = self._highpass.process(samples)
+        return samples
 
     def _frame_is_valid(self, samples) -> bool:
         try:
@@ -274,6 +328,10 @@ class LslEegBridge(Node):
 
     def _handle_pull_error(self, error) -> None:
         self._clock_aligner.reset()
+        # Re-arm the DC blocker too: a drop is a discontinuity, so the next chunk
+        # should re-anchor its offset rather than carry stale filter state across it.
+        if self._highpass is not None:
+            self._highpass.reset()
         if not self._reconnect:
             self._timer.cancel()
             self.get_logger().error(

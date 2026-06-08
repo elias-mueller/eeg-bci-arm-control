@@ -56,11 +56,15 @@ _EMPTY_XML = FakeXml(empty=True)
 
 
 def _make_desc(channels):
-    """Build a desc tree from [(label, unit), ...], linking channel siblings."""
+    """Build a desc tree from [(label, unit[, type]), ...], linking channel siblings."""
 
     node = None
-    for label, unit in reversed(channels):
-        node = FakeXml(values={"label": label, "unit": unit}, nxt=node)
+    for entry in reversed(channels):
+        label, unit = entry[0], entry[1]
+        values = {"label": label, "unit": unit}
+        if len(entry) > 2 and entry[2]:
+            values["type"] = entry[2]
+        node = FakeXml(values=values, nxt=node)
     channels_el = FakeXml(children={"channel": node} if node is not None else {})
     return FakeXml(children={"channels": channels_el})
 
@@ -613,6 +617,114 @@ def test_max_samples_respects_param_when_set(monkeypatch):
         assert node._max_samples() == 64
         node._on_tick()
         assert fake.last_inlet.last_max_samples == 64
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+# --- channel selection by type -----------------------------------------------
+
+
+def _mixed_info(channel_count=5):
+    # A BrainAccess-like outlet: EEG channels plus aux (accel / battery) channels.
+    channels = [
+        ("C3", "microvolts", "EEG"),
+        ("Cz", "microvolts", "EEG"),
+        ("C4", "microvolts", "EEG"),
+        ("Accel_x", "g", "Accel"),
+        ("Battery", "pct", "Battery"),
+    ][:channel_count]
+    return FakeStreamInfo(channel_count=channel_count, channels=channels)
+
+
+def test_init_selects_channels_by_type(monkeypatch):
+    # select_channel_type:=EEG keeps only the EEG columns (with their labels) and
+    # records the keep indices + the full source width for the chunk subset.
+    prime = ([[1.0, 2.0, 3.0, 9.0, 99.0]], [50.0])
+    node, _ = _build(
+        monkeypatch, info=_mixed_info(), chunks=[prime], overrides={"select_channel_type": "EEG"}
+    )
+    try:
+        assert node._channel_labels == ["C3", "Cz", "C4"]
+        assert node._keep_indices == (0, 1, 2)
+        assert node._source_channel_count == 5
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_on_tick_publishes_only_selected_channels(monkeypatch):
+    # The published frame carries only the EEG columns, transposed to channel-major.
+    prime = ([[0.0, 0.0, 0.0, 0.0, 0.0]], [50.0])
+    tick = ([[1.0, 2.0, 3.0, 7.0, 88.0], [4.0, 5.0, 6.0, 8.0, 89.0]], [51.0, 51.004])
+    node, _ = _build(
+        monkeypatch,
+        info=_mixed_info(),
+        chunks=[prime, tick],
+        overrides={"select_channel_type": "EEG"},
+    )
+    published = _capture(node)
+    try:
+        node._on_tick()
+        assert len(published) == 1
+        frame = published[0]
+        assert frame.channel_labels == ["C3", "Cz", "C4"]
+        # EEG columns 0,1,2 only: channel-major [C3_s0, C3_s1, Cz_s0, Cz_s1, C4_s0, C4_s1].
+        assert list(frame.samples) == pytest.approx([1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_init_selected_channel_count_mismatch_raises(monkeypatch):
+    # expected_channel_count validates the *selected* count: 3 EEG channels but the
+    # user expects 4 -> fail fast, naming the selection so the cause is obvious.
+    fake = FakePylsl(_mixed_info(), chunks=[])
+    monkeypatch.setattr(bridge_mod, "import_pylsl", lambda: fake)
+    rclpy.init(
+        args=["--ros-args", "-p", "select_channel_type:=EEG", "-p", "expected_channel_count:=4"]
+    )
+    try:
+        with pytest.raises(RuntimeError, match="after selecting 'EEG'"):
+            LslEegBridge()
+    finally:
+        rclpy.shutdown()
+
+
+# --- causal high-pass (DC blocker) -------------------------------------------
+
+
+def test_highpass_removes_dc_offset_before_contract(monkeypatch):
+    # A stream on a 200 mV DC pedestal (far over the 10000 uV ceiling) with small AC:
+    # highpass_hz:=0.5 centers it so the contract passes and the published frame is
+    # the AC, not the pedestal. Without the high-pass this stream cannot launch.
+    prime = ([[200000.0, 200000.0, 200000.0]], [50.0])
+    tick = ([[200000.0, 200000.0, 200000.0], [200010.0, 200000.0, 199990.0]], [51.0, 51.004])
+    node, _ = _build(monkeypatch, chunks=[prime, tick], overrides={"highpass_hz": "0.5"})
+    published = _capture(node)
+    try:
+        assert node._highpass is not None
+        node._on_tick()
+        assert len(published) == 1
+        assert max(abs(value) for value in published[0].samples) < 1000.0
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_pull_error_resets_highpass(monkeypatch):
+    # A pull error is a discontinuity: the DC blocker must re-arm so the next chunk
+    # re-anchors its offset instead of carrying stale filter state across the gap.
+    prime = ([[100000.0, 100000.0, 100000.0]], [50.0])
+    node, _ = _build(
+        monkeypatch, chunks=[prime, RuntimeError("lost")], overrides={"highpass_hz": "0.5"}
+    )
+    _capture(node)
+    try:
+        assert node._highpass._x_prev is not None  # primed the filter state
+        node._on_tick()  # pulls the RuntimeError -> _handle_pull_error
+        assert node._highpass._x_prev is None  # reset() re-armed it
+        assert node._pull_errors == 1
     finally:
         node.destroy_node()
         rclpy.shutdown()
