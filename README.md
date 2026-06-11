@@ -2,6 +2,8 @@
 
 Real-time motor-imagery EEG decoding driving a simulated Franka Panda manipulator over ROS 2, a closed loop from EEG frame to joint motion. A CSP + LDA classifier turns EEG windows into movement intents, and an EEGNet (PyTorch) decoder is benchmarked offline against the same baseline. The system is a C++/Python ROS 2 graph: a Python (`rclpy`) EEG and decoding pipeline feeding C++ (`rclcpp`) control nodes through shared `EegFrame`/`Intent` messages.
 
+![Franka Panda in RViz driven by a decoded left_hand motor-imagery intent at 0.75 confidence](docs/images/rviz-left-hand-intent.png)
+
 ## Setup
 
 One-time setup, in order; each item is only needed for the parts you use.
